@@ -43,10 +43,10 @@
   // ---------- shell ----------
   var PAGES = [
     ['dashboard', 'Dashboard', 'frontdesk.view'], ['frontdesk', 'Front Desk', 'frontdesk.view'], ['reservations', 'Reservations', 'reservations.view'],
-    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'],
+    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'],
     ['reports', 'Reports', 'reports.view'], ['users', 'Users & Roles', 'users.manage'], ['settings', 'Settings', null], ['audit', 'Audit Log', 'audit.view']
   ];
-  function allowedPages() { return PAGES.filter(function (p) { return !p[2] || can(p[2]); }); }
+  function allowedPages() { return PAGES.filter(function (p) { return !p[2] || (Array.isArray(p[2]) ? p[2].some(can) : can(p[2])); }); }
 
   function render() {
     var pages = allowedPages();
@@ -377,6 +377,99 @@
     }).catch(fail);
   }
 
+
+  // ----- bar, gift shop, business centre, salon, spa -----
+  var OUTLET_LABELS = { bar: 'Bar', gift_shop: 'Gift Shop', business_centre: 'Business Centre', salon: 'Salon', spa: 'Spa', laundry: 'Laundry', gym: 'Gym', pool: 'Pool', parking: 'Parking', transport: 'Transport' };
+  S.cart = {};
+  VIEWS.outlets = function (v) {
+    var keys = Object.keys(OUTLET_LABELS).filter(function (k) { return can(k + '.view'); });
+    var cur = keys.indexOf(S.outlet) !== -1 ? S.outlet : keys[0], tx = can(cur + '.transact'), mg = can(cur + '.manage');
+    var cart = S.cart[cur] = S.cart[cur] || [];
+    return Promise.all([API.call('outlet.list', { outlet: cur }), tx ? API.call('frontdesk.inHouse').catch(function () { return []; }) : Promise.resolve([])]).then(function (r) {
+      var d = r[0], inh = r[1], items = d.items.filter(function (i) { return i.is_active; }); S.outletItems = d.items;
+      var total = cart.reduce(function (t, l) { return t + l.quantity * l.unit_price; }, 0);
+      var sale = tx ? '<div class="card"><h3>New sale</h3><form id="addl" class="row" style="align-items:flex-end"><div class="f" style="flex:2 1 200px"><label>Item</label><select name="item_id"><option value="">— one-off item —</option>' + opts(items, 'id', function (i) { return i.name + ' · ' + money(i.price); }) + '</select></div><div class="f" style="flex:0 1 80px"><label>Qty</label><input name="quantity" type="number" min="1" value="1"></div><div class="f" id="oo1" style="display:none"><label>Description</label><input name="description"></div><div class="f" id="oo2" style="display:none;flex:0 1 110px"><label>Price</label><input name="unit_price" type="number" step="0.01" min="0.01"></div><div class="f" style="flex:0 0 auto"><button type="submit" class="sec">Add</button></div></form>' +
+        table(['Item', '>Qty', '>Price', '>Amount', ''], cart.map(function (l, i) { return '<tr><td>' + esc(l.description) + '</td><td class="r">' + l.quantity + '</td><td class="r">' + money(l.unit_price) + '</td><td class="r">' + money(l.quantity * l.unit_price) + '</td><td class="actions"><button class="sm danger" data-cx="' + i + '">×</button></td></tr>'; }), 'Cart is empty.') +
+        '<form id="sellf" style="margin-top:12px"><div class="row"><div class="f"><label>Settlement</label><select name="settlement_type" id="stt"><option value="walk_in">Pay now</option><option value="room_charge">Charge to in-house guest\'s room</option></select></div><div class="f" id="pmw"><label>Payment method</label><select name="payment_method_id">' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select></div><div class="f" id="rmw" style="display:none"><label>Room</label><select name="folio_id">' + (inh.length ? opts(inh, 'folio_id', function (s2) { return 'Room ' + s2.room_number + ' — ' + s2.guest_name; }) : '<option value="">No guests in house</option>') + '</select></div><div class="f"><label>Customer (optional)</label><input name="customer_name"></div></div><div class="actions"><span class="total" style="margin-right:auto">Total ' + money(total) + '</span><button type="submit"' + (cart.length ? '' : ' disabled') + '>Complete sale &amp; print receipt</button></div></form></div>' : '';
+      var hist = '<div class="card"><h3>Recent sales</h3>' + table(['Sale', 'When', 'Customer / room', 'Settlement', '>Total', ''], d.sales.map(function (x) { return '<tr><td>' + esc(x.sale_number) + '</td><td class="muted">' + esc((x.settled_at || '').substr(0, 16)) + '</td><td>' + esc(x.room_number ? 'Room ' + x.room_number + ' · ' + x.guest_name : x.guest_name || '—') + '</td><td>' + (x.settlement_type === 'room_charge' ? 'Room charge' : esc(x.method_name)) + '</td><td class="r">' + money(x.amount_paid) + '</td><td class="actions"><button class="sm sec" data-act="orcpt" data-id="' + x.id + '">Receipt</button></td></tr>'; }), 'No sales yet.') + '</div>';
+      var list = '<div class="card"><h3>Price list' + (mg ? ' <button class="sm gold" data-act="newoitem" style="float:right">+ Add item</button>' : '') + '</h3>' + table(['Item', '>Price', ''], d.items.map(function (i) { return '<tr><td>' + esc(i.name) + (i.is_active ? '' : ' <span class="pill">off</span>') + '</td><td class="r">' + money(i.price) + '</td><td class="actions">' + (mg ? '<button class="sm sec" data-act="editoitem" data-id="' + i.id + '">Edit</button>' : '') + '</td></tr>'; }), 'No items yet.') + '</div>';
+      v.innerHTML = '<div class="tabs">' + keys.map(function (k) { return '<button data-act="outlettab" data-o="' + k + '" class="' + (k === cur ? 'on' : '') + '">' + OUTLET_LABELS[k] + '</button>'; }).join('') + '</div>' + sale + '<div class="grid g2">' + hist + list + '</div>';
+      S.outlet = cur;
+      var addl = v.querySelector('#addl');
+      if (addl) {
+        var sel = addl.querySelector('[name=item_id]'), toggle = function () { var one = !sel.value; v.querySelector('#oo1').style.display = v.querySelector('#oo2').style.display = one ? '' : 'none'; }; sel.onchange = toggle; toggle();
+        addl.onsubmit = function (e) {
+          e.preventDefault(); var f = e.target, q = Number(f.quantity.value);
+          if (!(q >= 1) || Math.floor(q) !== q) return toast('Quantity must be a whole number of at least 1.', true);
+          if (sel.value) { var it = items.filter(function (x) { return String(x.id) === sel.value; })[0]; cart.push({ item_id: it.id, description: it.name, quantity: q, unit_price: it.price }); }
+          else { var pr = Number(f.unit_price.value); if (!f.description.value.trim() || !(pr > 0)) return toast('Enter a description and a price above zero.', true); cart.push({ description: f.description.value.trim(), quantity: q, unit_price: pr }); }
+          refresh();
+        };
+        Array.prototype.forEach.call(v.querySelectorAll('[data-cx]'), function (b) { b.onclick = function () { cart.splice(Number(b.getAttribute('data-cx')), 1); refresh(); }; });
+        var stt = v.querySelector('#stt'); stt.onchange = function () { var rc = stt.value === 'room_charge'; v.querySelector('#rmw').style.display = rc ? '' : 'none'; v.querySelector('#pmw').style.display = rc ? 'none' : ''; };
+        v.querySelector('#sellf').onsubmit = function (e) {
+          e.preventDefault(); var d2 = formData(e.target);
+          var payload = { outlet: cur, settlement_type: d2.settlement_type, payment_method_id: d2.settlement_type === 'walk_in' ? Number(d2.payment_method_id) : null, folio_id: d2.settlement_type === 'room_charge' ? Number(d2.folio_id) : null, customer_name: d2.customer_name, items: cart.map(function (l) { return { item_id: l.item_id || null, description: l.description, quantity: l.quantity, unit_price: l.unit_price }; }) };
+          busy(e.target.querySelector('button[type=submit]'), function () { return API.call('outlet.sell', payload).then(function (res) { S.cart[cur] = []; toast('Sale ' + res.sale_number + ' completed.'); refresh(); return API.call('outlet.receipt', { outlet: cur, sale_id: res.id }).then(showReceipt); }); });
+        };
+      }
+    });
+  };
+  function outletItemModal(it) {
+    it = it || {}; var o = S.outlet;
+    simpleModal(it.id ? 'Edit item' : 'Add item', '<div class="f"><label>Name *</label><input name="name" required value="' + esc(it.name) + '"></div><div class="f"><label>Price *</label><input name="price" type="number" step="0.01" min="0.01" required value="' + esc(it.price) + '"></div><label class="chk f"><input type="checkbox" name="is_active"' + (it.id && !it.is_active ? '' : ' checked') + '> Available</label>', 'outlet.itemSave', Object.assign({ outlet: o }, it.id ? { id: it.id } : {}));
+  }
+
+
+  // ----- inventory -----
+  var STK = { out: 'Out of stock', low: 'Low', ok: 'In stock' };
+  VIEWS.inventory = function (v) {
+    var tab = S.invTab || 'stock', flt = S.invFilter || 'all', q = (S.invQ || '').toLowerCase(), tx = can('inventory.transact'), mg = can('inventory.manage');
+    return API.call('inventory.data').then(function (d) {
+      S.inv = d; var cnt = { all: d.items.length, out: 0, low: 0, ok: 0 }; d.items.forEach(function (i) { if (i.is_active) cnt[i.status]++; else cnt.all--; });
+      var list = d.items.filter(function (i) { return i.is_active && (flt === 'all' || i.status === flt) && (!q || i.name.toLowerCase().indexOf(q) !== -1 || i.store.toLowerCase().indexOf(q) !== -1); });
+      function meter(i) { var top = i.reorder_level > 0 ? i.reorder_level * 2 : Math.max(i.quantity, 1); var pct = Math.max(0, Math.min(100, i.quantity / top * 100)); return '<div class="stk-meter"><div class="stk-fill ' + i.status + '" style="width:' + pct + '%"></div>' + (i.reorder_level > 0 ? '<span class="stk-tick"></span>' : '') + '</div>'; }
+      var stock = '<div class="grid g4" style="margin-bottom:14px">' + [['all', 'All items', cnt.all], ['out', 'Out of stock', cnt.out], ['low', 'Low stock', cnt.low], ['ok', 'In stock', cnt.ok]].map(function (c) {
+        return '<button class="stk-card ' + c[0] + (flt === c[0] ? ' on' : '') + '" data-act="invfilter" data-f="' + c[0] + '"><b>' + c[2] + '</b><span>' + c[1] + '</span></button>'; }).join('') + '</div>' +
+        '<div class="card"><form id="iq" class="row" style="align-items:flex-end"><div class="f"><label>Search</label><input name="q" value="' + esc(S.invQ || '') + '" placeholder="Item or store"></div></form>' +
+        table(['Item', 'Store', '>On hand', 'Level', 'Status', ''], list.map(function (i) {
+          return '<tr><td><b>' + esc(i.name) + '</b></td><td>' + esc(i.store) + '</td><td class="r">' + i.quantity + ' <span class="muted">' + esc(i.unit) + '</span></td><td style="min-width:120px">' + meter(i) + '<div class="muted" style="font-size:.72rem">reorder at ' + i.reorder_level + '</div></td><td><span class="stk-pill ' + i.status + '">' + STK[i.status] + '</span></td><td class="actions">' + (tx ? '<button class="sm sec" data-act="invmove" data-id="' + i.id + '">Move stock</button>' : '') + '</td></tr>'; }), 'No items match.') + '</div>';
+      var moves = '<div class="card">' + table(['When', 'Item', 'Type', '>Change', '>Balance', 'By', 'Note'], d.movements.map(function (m) {
+        return '<tr><td class="muted" style="white-space:nowrap">' + esc(m.created_at.substr(0, 16)) + '</td><td>' + esc(m.item) + '</td><td>' + esc(m.movement_type) + '</td><td class="r ' + (m.quantity < 0 ? 'neg' : '') + '">' + (m.quantity > 0 ? '+' : '') + m.quantity + '</td><td class="r">' + m.balance_after + '</td><td>' + esc(m.by) + '</td><td class="muted">' + esc(m.notes) + '</td></tr>'; }), 'No stock movements yet.') + '</div>';
+      var setup = '<div class="grid g2"><div class="card"><h3>Stores <button class="sm gold" data-act="invnew" data-k="store" style="float:right">+ Add</button></h3>' + table(['Store', ''], d.stores.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="actions"><button class="sm sec" data-act="invedit" data-k="store" data-id="' + x.id + '">Edit</button></td></tr>'; }), 'No stores yet.') + '</div>' +
+        '<div class="card"><h3>Units <button class="sm gold" data-act="invnew" data-k="unit" style="float:right">+ Add</button></h3>' + table(['Unit', ''], d.units.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="actions"><button class="sm sec" data-act="invedit" data-k="unit" data-id="' + x.id + '">Edit</button></td></tr>'; }), 'No units yet.') + '</div></div>' +
+        '<div class="card"><h3>Items <button class="sm gold" data-act="invitem" style="float:right">+ Add item</button></h3>' + table(['Item', 'Store', 'Unit', '>Reorder level', ''], d.items.map(function (i) { return '<tr><td>' + esc(i.name) + (i.is_active ? '' : ' <span class="pill">off</span>') + '</td><td>' + esc(i.store) + '</td><td>' + esc(i.unit) + '</td><td class="r">' + i.reorder_level + '</td><td class="actions"><button class="sm sec" data-act="invitem" data-id="' + i.id + '">Edit</button></td></tr>'; }), 'No items yet.') + '</div>';
+      v.innerHTML = '<div class="tabs"><button data-act="invtab" data-t="stock" class="' + (tab === 'stock' ? 'on' : '') + '">Stock levels</button><button data-act="invtab" data-t="moves" class="' + (tab === 'moves' ? 'on' : '') + '">Movements</button>' + (mg ? '<button data-act="invtab" data-t="setup" class="' + (tab === 'setup' ? 'on' : '') + '">Setup</button>' : '') + '</div>' + (tab === 'moves' ? moves : tab === 'setup' && mg ? setup : stock);
+      var iq = v.querySelector('#iq'); if (iq) { iq.onsubmit = function (e) { e.preventDefault(); S.invQ = e.target.q.value; refresh(); }; }
+    });
+  };
+  function invMoveModal(id) {
+    var it = S.inv.items.filter(function (i) { return String(i.id) === String(id); })[0];
+    modal('Move stock — ' + it.name, '<p class="muted">On hand: <b>' + it.quantity + ' ' + esc(it.unit) + '</b> (' + esc(it.store) + ')</p><form id="mv"><div class="row"><div class="f"><label>Action</label><select name="movement_type" id="mt"><option value="in">Receive stock (in)</option><option value="out">Issue / use (out)</option><option value="adjust">Stock-take (set counted quantity)</option></select></div><div class="f"><label id="ql">Quantity</label><input name="quantity" type="number" step="0.001" min="0" required></div></div><div class="f"><label>Reference (optional)</label><input name="reference" placeholder="e.g. delivery note"></div><div class="f"><label id="nl">Note</label><input name="notes"></div><div class="actions"><button type="submit">Save</button></div></form>', function (m) {
+      var mt = m.el.querySelector('#mt'); mt.onchange = function () { m.el.querySelector('#ql').textContent = mt.value === 'adjust' ? 'Counted quantity' : 'Quantity'; m.el.querySelector('#nl').textContent = mt.value === 'adjust' ? 'Reason (required)' : 'Note'; };
+      m.el.querySelector('#mv').onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); d.item_id = it.id; busy(e.target.querySelector('button'), function () { return API.call('inventory.move', d).then(function () { m.close(); toast('Stock updated.'); refresh(); }); }); };
+    });
+  }
+  function invItemModal(id) {
+    var it = id ? S.inv.items.filter(function (i) { return String(i.id) === String(id); })[0] : {};
+    if (!S.inv.stores.length || !S.inv.units.length) return toast('Add at least one store and one unit first.', true);
+    simpleModal(it.id ? 'Edit stock item' : 'Add stock item', '<div class="f"><label>Name *</label><input name="name" required value="' + esc(it.name) + '"></div><div class="row"><div class="f"><label>Store *</label><select name="store_id">' + opts(S.inv.stores, 'id', function (x) { return x.name; }, it.store_id) + '</select></div><div class="f"><label>Unit *</label><select name="unit_id">' + opts(S.inv.units, 'id', function (x) { return x.name; }, it.unit_id) + '</select></div></div><div class="f"><label>Reorder level (alert when stock is at or below this)</label><input name="reorder_level" type="number" step="0.001" min="0" value="' + esc(it.reorder_level || 0) + '"></div><label class="chk f"><input type="checkbox" name="is_active"' + (it.id && !it.is_active ? '' : ' checked') + '> In use</label>' + (it.id ? '' : '<p class="muted">New items start at 0. Use <b>Move stock</b> to receive the opening quantity.</p>'), 'inventory.itemSave', it.id ? { id: it.id } : {});
+  }
+
+  // ----- expenses -----
+  VIEWS.expenses = function (v) {
+    var from = S.expFrom || today().slice(0, 8) + '01', to = S.expTo || today();
+    return API.call('expenses.list', { from: from, to: to }).then(function (d) {
+      S.expCats = d.categories;
+      v.innerHTML = '<div class="card"><form id="ef" class="row" style="align-items:flex-end"><div class="f"><label>From</label><input type="date" name="from" value="' + from + '"></div><div class="f"><label>To</label><input type="date" name="to" value="' + to + '"></div><div class="f" style="flex:0 0 auto"><button type="submit" class="sec">Show</button></div>' +
+        (can('expenses.create') ? '<div class="f" style="flex:0 0 auto"><button type="button" class="gold" data-act="newexp">+ Record expense</button></div><div class="f" style="flex:0 0 auto"><button type="button" class="sec" data-act="newexpcat">+ Category</button></div>' : '') + '</form>' +
+        '<div class="kv" style="margin-bottom:10px"><b>Total (excluding voided)</b><span class="total">' + money(d.total) + '</span></div>' +
+        table(['Number', 'Date', 'Category', 'Payee', 'Description', '>Amount', 'Status', ''], d.expenses.map(function (e) {
+          return '<tr><td>' + esc(e.expense_number) + '</td><td>' + esc(e.expense_date) + '</td><td>' + esc(e.category) + '</td><td>' + esc(e.payee) + '</td><td>' + esc(e.description) + '<div class="muted">' + esc(e.method_name) + '</div></td><td class="r">' + money(e.amount) + '</td><td>' + (e.status === 'void' ? '<span class="pill bad" title="' + esc(e.void_reason) + '">void</span>' : '<span class="pill ok">paid</span>') + '</td><td class="actions">' + (e.status === 'paid' && can('expenses.void') ? '<button class="sm danger" data-act="voidexp" data-id="' + e.id + '">Void</button>' : '') + '</td></tr>'; }), 'No expenses in this period.') + '</div>';
+      v.querySelector('#ef').onsubmit = function (e) { e.preventDefault(); S.expFrom = e.target.from.value; S.expTo = e.target.to.value; refresh(); };
+    });
+  };
+
   // ----- reports -----
   function periodReport(v) {
     var from = S.repFrom || addDays(today(), -29), to = S.repTo || today();
@@ -407,7 +500,8 @@
         var c = r.current, p = r.previous;
         function delta(a, b) { var d = round(a - b); return '<td class="r ' + (d < 0 ? 'neg' : '') + '">' + (d > 0 ? '+' : '') + money(d) + '</td>'; }
         function round(n) { return Math.round(n * 100) / 100; }
-        var rows = [['Payments received', c.payments_total, p.payments_total], ['Charges posted', c.charges_total, p.charges_total], ['Room revenue', c.room_revenue, p.room_revenue], ['Restaurant walk-in sales', c.restaurant_walkin_sales, p.restaurant_walkin_sales], ['Average room rate', c.average_rate, p.average_rate]].map(function (x) { return '<tr><td>' + x[0] + '</td><td class="r">' + money(x[1]) + '</td><td class="r">' + money(x[2]) + '</td>' + delta(x[1], x[2]) + '</tr>'; });
+        function sum(o) { return Object.keys(o || {}).reduce(function (t, k) { return t + o[k]; }, 0); }
+        var rows = [['Payments received', c.payments_total, p.payments_total], ['Charges posted', c.charges_total, p.charges_total], ['Room revenue', c.room_revenue, p.room_revenue], ['Restaurant walk-in sales', c.restaurant_walkin_sales, p.restaurant_walkin_sales], ['Average room rate', c.average_rate, p.average_rate], ['Expenses (not voided)', c.expenses_total, p.expenses_total], ['Cash in less expenses', c.payments_total + sum(c.outlet_walkin_sales) + c.restaurant_walkin_sales - c.expenses_total, p.payments_total + sum(p.outlet_walkin_sales) + p.restaurant_walkin_sales - p.expenses_total]].map(function (x) { return '<tr><td>' + x[0] + '</td><td class="r">' + money(x[1]) + '</td><td class="r">' + money(x[2]) + '</td>' + delta(x[1], x[2]) + '</tr>'; });
         rows.push('<tr><td>Room nights sold</td><td class="r">' + c.room_nights + '</td><td class="r">' + p.room_nights + '</td><td class="r">' + (c.room_nights - p.room_nights) + '</td></tr>');
         rows.push('<tr><td>Check-ins</td><td class="r">' + c.checkins_total + '</td><td class="r">' + p.checkins_total + '</td><td class="r">' + (c.checkins_total - p.checkins_total) + '</td></tr>');
         var map = {}; p.checkins_per_room.forEach(function (x) { map[x.room_number] = x.checkins; });
@@ -415,6 +509,7 @@
         function kv(o) { return Object.keys(o).sort().map(function (k) { return '<tr><td>' + esc(k.replace(/_/g, ' ')) + '</td><td class="r">' + money(o[k]) + '</td></tr>'; }); }
         v.querySelector('#mout').innerHTML = '<div class="card"><h3>' + esc(S.hotel.name) + ' — monthly financial report, ' + esc(r.month) + ' <span class="muted">(compared with ' + esc(r.previous_month) + ')</span></h3>' + table(['Measure', '>' + r.month, '>' + r.previous_month, '>Change'], rows) + '</div>' +
           '<div class="grid g2"><div class="card"><h3>Payments by method</h3>' + table(['Method', '>Net amount'], kv(c.payments_by_method), 'None.') + '</div><div class="card"><h3>Charges by service</h3>' + table(['Service', '>Amount'], kv(c.charges_by_service), 'None.') + '</div></div>' +
+          '<div class="grid g2"><div class="card"><h3>Walk-in sales by outlet</h3>' + table(['Outlet', '>Amount'], kv(c.outlet_walkin_sales), 'None.') + '</div><div class="card"><h3>Expenses by category</h3>' + table(['Category', '>Amount'], kv(c.expenses_by_category), 'None.') + '</div></div>' +
           '<div class="card"><h3>Check-ins per room</h3>' + table(['Room', '>' + r.month, '>' + r.previous_month, '>Change'], rooms, 'No rooms.') + '</div>' + footerHtml(r.generated_at);
       });
     }
@@ -433,6 +528,10 @@
           table(['Item', '>Qty', '>Price', '>Amount'], o.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.unit_price) + '</td><td class="r">' + money(i.amount) + '</td></tr>'; })) +
           '<div class="kv" style="margin-top:8px"><b>Total</b><span class="total">' + money(o.total) + '</span><b>Settlement</b><span>' + esc(o.method_name) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
       }).join('');
+    } else if (d.kind === 'outlet') {
+      sheets = '<div class="sheet">' + head + '<h4 style="text-align:center">' + esc(d.outlet_label.toUpperCase()) + ' RECEIPT</h4><div class="kv"><b>Receipt</b><span>' + esc(d.sale.sale_number) + '</span><b>Date</b><span>' + esc((d.sale.settled_at || '').substr(0, 16)) + '</span>' + (d.guest_name ? '<b>Customer</b><span>' + esc(d.guest_name) + '</span>' : '') + (d.room ? '<b>Room</b><span>' + esc(d.room) + '</span>' : '') + '<b>Served by</b><span>' + esc(d.served_by) + '</span></div>' +
+        table(['Item', '>Qty', '>Price', '>Amount'], d.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.unit_price) + '</td><td class="r">' + money(i.amount) + '</td></tr>'; })) +
+        '<div class="kv" style="margin-top:8px"><b>Total</b><span class="total">' + money(d.total) + '</span><b>Settlement</b><span>' + esc(d.method_name) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
     } else if (d.kind === 'payment') {
       var p = d.payment;
       sheets = d.copies.map(function (copy) {
@@ -529,6 +628,21 @@
     newtable: function () { simpleModal('Add table', '<div class="f"><label>Name *</label><input name="name" required placeholder="e.g. Table 5"></div>', 'restaurant.tableSave'); },
     edittable: function (b) { var t = S.menuCache.tables.filter(function (x) { return String(x.id) === b.getAttribute('data-id'); })[0]; simpleModal('Edit table', '<div class="f"><label>Name *</label><input name="name" required value="' + esc(t.name) + '"></div><label class="chk f"><input type="checkbox" name="is_active"' + (t.is_active ? ' checked' : '') + '> In use</label>', 'restaurant.tableSave', { id: t.id }); },
     newcat: function () { simpleModal('Add category', '<div class="f"><label>Name *</label><input name="name" required placeholder="e.g. Starters"></div>', 'restaurant.categorySave'); },
+    outlettab: function (b) { S.outlet = b.getAttribute('data-o'); refresh(); },
+    orcpt: function (b) { API.call('outlet.receipt', { outlet: S.outlet, sale_id: Number(b.getAttribute('data-id')) }).then(showReceipt).catch(fail); },
+    newoitem: function () { outletItemModal(); },
+    editoitem: function (b) { outletItemModal(S.outletItems.filter(function (i) { return String(i.id) === b.getAttribute('data-id'); })[0]); },
+    newexpcat: function () { simpleModal('Add expense category', '<div class="f"><label>Name *</label><input name="name" required></div>', 'expenses.categorySave'); },
+    newexp: function () {
+      simpleModal('Record expense', '<div class="row"><div class="f"><label>Date</label><input type="date" name="expense_date" value="' + today() + '" required></div><div class="f"><label>Category *</label><select name="category_id">' + opts(S.expCats, 'id', function (c) { return c.name; }) + '</select></div></div><div class="row"><div class="f"><label>Payee *</label><input name="payee" required></div><div class="f"><label>Amount *</label><input name="amount" type="number" step="0.01" min="0.01" required></div></div><div class="f"><label>Description *</label><input name="description" required></div><div class="f"><label>Paid by</label><select name="payment_method_id">' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select></div>', 'expenses.create');
+    },
+    voidexp: function (b) { var r = prompt('Reason for voiding this expense:'); if (r) busy(b, function () { return API.call('expenses.void', { id: Number(b.getAttribute('data-id')), reason: r }).then(function () { toast('Expense voided.'); refresh(); }); }); },
+    invtab: function (b) { S.invTab = b.getAttribute('data-t'); refresh(); },
+    invfilter: function (b) { S.invFilter = b.getAttribute('data-f'); refresh(); },
+    invmove: function (b) { invMoveModal(b.getAttribute('data-id')); },
+    invitem: function (b) { invItemModal(b.getAttribute('data-id')); },
+    invnew: function (b) { var k = b.getAttribute('data-k'); simpleModal('Add ' + k, '<div class="f"><label>Name *</label><input name="name" required></div>', 'inventory.' + k + 'Save'); },
+    invedit: function (b) { var k = b.getAttribute('data-k'), x = S.inv[k + 's'].filter(function (r) { return String(r.id) === b.getAttribute('data-id'); })[0]; simpleModal('Edit ' + k, '<div class="f"><label>Name *</label><input name="name" required value="' + esc(x.name) + '"></div>', 'inventory.' + k + 'Save', { id: x.id }); },
     chgurl: function () { connectScreen(); }
   };
   document.addEventListener('click', function (e) {
