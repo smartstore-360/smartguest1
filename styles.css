@@ -48,3 +48,21 @@ label{display:block;font-size:.78rem;font-weight:700;color:var(--muted);margin:0
 .menu{display:none}
 @media(max-width:820px){.shell{flex-direction:column}.side{width:100%;height:auto;position:static;padding:10px}.nav{display:flex;flex-wrap:wrap;gap:4px}.nav a{padding:6px 10px}.main{padding:14px}.hotelname{display:none}}
 @media print{.side,.top button,.actions,#toasts{display:none!important}.main{padding:0}.modal{box-shadow:none;border:0}}
+/* receipts / invoices */
+.sheet{border:1px dashed var(--border);border-radius:10px;padding:18px;margin-bottom:16px;background:#fff;color:#111;font-size:.9rem}
+.sheet .muted,.sheet .kv b{color:#555}.rc-head{text-align:center;margin-bottom:10px;font-size:1.05rem}
+.copylabel{text-align:center;font-weight:800;letter-spacing:.12em;font-size:.78rem;border:1px solid #111;display:inline-block;padding:2px 10px;margin:0 auto 10px;position:relative;left:50%;transform:translateX(-50%)}
+.sheet th{background:#eee;color:#333}.sheet td{border-bottom:1px solid #ddd}.sheet tr:hover td{background:none}
+.docfoot{margin-top:14px;padding-top:8px;border-top:1px solid #bbb;text-align:center;font-size:.78rem;color:#555}
+.docfoot b{color:#111}
+@media print{
+  body{background:#fff}.shell>.side,.noprint,.tabs,#toasts,.top,.modal h3,form{display:none!important}
+  .main{padding:0!important}.shell{display:block}
+  .modalbg{position:static!important;background:none!important;padding:0!important;display:block}
+  .modal{box-shadow:none!important;border:0!important;padding:0!important;width:100%!important}
+  .sheet{border:0;page-break-after:always;padding:6mm}.sheet:last-child{page-break-after:auto}
+  body:has(.modalbg) .main{display:none}
+  .docfoot{display:block}
+}
+@media print{.modalbg:not(:last-of-type){display:none!important}}
+@media print{.shell{min-height:0!important;display:block!important}html,body{height:auto!important}}

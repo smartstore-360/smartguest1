@@ -43,7 +43,7 @@
   // ---------- shell ----------
   var PAGES = [
     ['dashboard', 'Dashboard', 'frontdesk.view'], ['frontdesk', 'Front Desk', 'frontdesk.view'], ['reservations', 'Reservations', 'reservations.view'],
-    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'],
+    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'],
     ['reports', 'Reports', 'reports.view'], ['users', 'Users & Roles', 'users.manage'], ['settings', 'Settings', null], ['audit', 'Audit Log', 'audit.view']
   ];
   function allowedPages() { return PAGES.filter(function (p) { return !p[2] || can(p[2]); }); }
@@ -165,12 +165,12 @@
       var items = f.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.amount) + '</td></tr>'; });
       var pays = f.payments.map(function (p) {
         return '<tr><td>' + esc(p.receipt_number) + '</td><td>' + esc(p.method_name) + (p.notes ? ' <span class="muted">· ' + esc(p.notes) + '</span>' : '') + '</td><td class="r ' + (p.amount < 0 ? 'neg' : '') + '">' + money(p.amount) + '</td><td class="actions">' +
-          (can('payments.reverse') && p.amount > 0 && p.status !== 'reversed' ? '<button class="sm danger" data-rev="' + p.id + '" data-max="' + p.amount + '">Reverse</button>' : (p.status === 'reversed' ? '<span class="pill">reversed</span>' : '')) + '</td></tr>';
+          (can('invoicing.print') ? '<button class="sm sec" data-rcpt="' + p.id + '">Receipt</button>' : '') + (can('payments.reverse') && p.amount > 0 && p.status !== 'reversed' ? '<button class="sm danger" data-rev="' + p.id + '" data-max="' + p.amount + '">Reverse</button>' : (p.status === 'reversed' ? '<span class="pill">reversed</span>' : '')) + '</td></tr>';
       });
       var html = '<div class="kv"><b>Guest</b><span>' + esc(f.guest.full_name) + '</span><b>Room</b><span>' + esc(f.room) + '</span><b>Folio</b><span>' + esc(f.folio.folio_number) + ' ' + pill(open ? 'open' : 'closed') + '</span></div>' +
         '<h4 style="margin-top:14px">Charges</h4>' + table(['Description', '>Qty', '>Amount'], items, 'No charges yet.') +
         '<h4 style="margin-top:14px">Payments</h4>' + table(['Receipt', 'Method', '>Amount', ''], pays, 'No payments yet.') +
-        '<div class="kv" style="margin-top:14px"><b>Charges</b><span>' + money(f.charges) + '</span><b>Paid</b><span>' + money(f.paid) + '</span><b>Balance</b><span class="total ' + (f.balance > 0 ? 'neg' : '') + '">' + money(f.balance) + '</span></div>' +
+        (can('invoicing.print') ? '<div class="actions"><button class="sm sec" data-invoice="1">Print invoice</button></div>' : '') + '<div class="kv" style="margin-top:14px"><b>Charges</b><span>' + money(f.charges) + '</span><b>Paid</b><span>' + money(f.paid) + '</span><b>Balance</b><span class="total ' + (f.balance > 0 ? 'neg' : '') + '">' + money(f.balance) + '</span></div>' +
         (can('payments.receive') ? '<form id="pf" class="row" style="margin-top:14px;align-items:flex-end"><div class="f"><label>Receive payment</label><input name="amount" type="number" step="0.01" min="0.01" required placeholder="Amount"></div><div class="f"><label>Method</label><select name="payment_method_id">' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select></div><div class="f"><label>Note</label><input name="notes"></div><div class="f" style="flex:0 0 auto"><button type="submit">Receive</button></div></form>' : '') +
         (open && can('folio.add_charge') ? '<form id="cf2" class="row" style="align-items:flex-end"><div class="f" style="flex:2 1 180px"><label>Add charge</label><input name="description" required placeholder="Description"></div><div class="f" style="flex:0 1 80px"><label>Qty</label><input name="quantity" type="number" min="1" step="1" value="1"></div><div class="f"><label>Unit amount</label><input name="unit_amount" type="number" min="0.01" step="0.01" required></div><div class="f" style="flex:0 0 auto"><button type="submit" class="sec">Add</button></div></form>' : '') +
         (open && can('folio.discount') ? '<form id="df" class="row" style="align-items:flex-end"><div class="f" style="flex:2 1 180px"><label>Discount</label><input name="description" placeholder="Reason"></div><div class="f"><label>Amount off</label><input name="amount" type="number" min="0.01" step="0.01" required></div><div class="f" style="flex:0 0 auto"><button type="submit" class="sec">Apply</button></div></form>' : '');
@@ -181,6 +181,8 @@
       on('#pf', function (d) { d.folio_id = f.folio.id; d.idempotency_key = key; key = uuid(); return API.call('payments.receive', d).then(function (r) { toast('Payment received — receipt ' + r.receipt_number); }); });
       on('#cf2', function (d) { d.folio_id = f.folio.id; return API.call('folio.addCharge', d).then(function () { toast('Charge added.'); }); });
       on('#df', function (d) { d.folio_id = f.folio.id; return API.call('folio.discount', d).then(function () { toast('Discount applied.'); }); });
+      Array.prototype.forEach.call(m.el.querySelectorAll('[data-rcpt]'), function (b) { b.onclick = function () { API.call('receipt.payment', { payment_id: Number(b.getAttribute('data-rcpt')) }).then(showReceipt).catch(fail); }; });
+      var inv = m.el.querySelector('[data-invoice]'); if (inv) inv.onclick = function () { showReceipt({ kind: 'invoice', folio: f, copies: [''], printed_by: S.user.full_name, printed_at: new Date().toLocaleString(), hotel: S.hotel }); };
       Array.prototype.forEach.call(m.el.querySelectorAll('[data-rev]'), function (b) {
         b.onclick = function () {
           var amt = prompt('Amount to reverse (max ' + b.getAttribute('data-max') + '):', b.getAttribute('data-max')); if (amt === null) return;
@@ -296,8 +298,87 @@
     });
   };
 
+
+  // ----- restaurant -----
+  VIEWS.restaurant = function (v) {
+    var tab = S.rtab || 'orders', f = S.rfilter || 'active';
+    var calls = [API.call('restaurant.orders', { status: f === 'all' ? '' : f }), API.call('restaurant.menu')];
+    return Promise.all(calls).then(function (r) {
+      var orders = r[0], menu = r[1]; S.menuCache = menu; var mg = can('restaurant.manage'), tx = can('restaurant.transact');
+      var ordersHtml = '<div class="card"><div class="row" style="align-items:flex-end;margin-bottom:10px"><div class="f"><label>Show</label><select id="of">' + [['active', 'Open orders'], ['settled', 'Settled'], ['cancelled', 'Cancelled'], ['all', 'All']].map(function (x) { return '<option value="' + x[0] + '"' + (f === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>' +
+        (tx ? '<div class="f" style="flex:0 0 auto"><button class="gold" data-act="neworder">+ New order</button></div>' : '') + '</div>' +
+        table(['Order', 'Table / Room', 'Type', 'Status', '>Total', ''], orders.map(function (o) {
+          return '<tr><td>' + esc(o.order_number) + '</td><td>' + esc(o.room_number ? 'Room ' + o.room_number + ' · ' + o.guest_name : o.table_name || '—') + '</td><td>' + (o.settlement_type === 'room_charge' ? 'Room charge' : 'Walk-in') + '</td><td>' + pill(o.status) + '</td><td class="r">' + money(o.total) + '</td><td class="actions"><button class="sm sec" data-act="openorder" data-id="' + o.id + '">Open</button></td></tr>'; }), 'No orders.') + '</div>';
+      var setupHtml = '<div class="grid g2"><div class="card"><h3>Menu' + (mg ? ' <button class="sm gold" data-act="newmenu" style="float:right">+ Add item</button>' : '') + '</h3>' + table(['Item', 'Category', '>Price', ''], menu.items.map(function (m) { return '<tr><td>' + esc(m.name) + (m.is_active ? '' : ' <span class="pill">off</span>') + '</td><td>' + esc(m.category) + '</td><td class="r">' + money(m.price) + '</td><td class="actions">' + (mg ? '<button class="sm sec" data-act="editmenu" data-id="' + m.id + '">Edit</button>' : '') + '</td></tr>'; }), 'No menu items yet.') + '</div>' +
+        '<div><div class="card"><h3>Tables' + (mg ? ' <button class="sm gold" data-act="newtable" style="float:right">+ Add</button>' : '') + '</h3>' + table(['Table', ''], menu.tables.map(function (t) { return '<tr><td>' + esc(t.name) + (t.is_active ? '' : ' <span class="pill">off</span>') + '</td><td class="actions">' + (mg ? '<button class="sm sec" data-act="edittable" data-id="' + t.id + '">Edit</button>' : '') + '</td></tr>'; }), 'No tables yet.') + '</div>' +
+        '<div class="card"><h3>Categories' + (mg ? ' <button class="sm gold" data-act="newcat" style="float:right">+ Add</button>' : '') + '</h3>' + table(['Category'], menu.categories.map(function (c) { return '<tr><td>' + esc(c.name) + '</td></tr>'; }), 'No categories yet.') + '</div></div></div>';
+      v.innerHTML = '<div class="tabs"><button data-act="rtab" data-tab="orders" class="' + (tab === 'orders' ? 'on' : '') + '">Orders</button>' + (mg ? '<button data-act="rtab" data-tab="setup" class="' + (tab === 'setup' ? 'on' : '') + '">Menu &amp; setup</button>' : '') + '</div>' + (tab === 'setup' && mg ? setupHtml : ordersHtml);
+      var of = v.querySelector('#of'); if (of) of.onchange = function () { S.rfilter = of.value; refresh(); };
+    });
+  };
+
+  function simpleModal(title, fieldsHtml, action, extra, getMore) {
+    modal(title, '<form id="sf">' + fieldsHtml + '<div class="actions"><button type="submit">Save</button></div></form>', function (m) {
+      m.el.querySelector('#sf').onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); Object.assign(d, extra || {}); busy(e.target.querySelector('button'), function () { return API.call(action, d).then(function () { m.close(); toast('Saved.'); refresh(); }); }); };
+    });
+  }
+  function menuModal(it) {
+    it = it || {}; var cats = S.menuCache.categories;
+    simpleModal(it.id ? 'Edit menu item' : 'Add menu item', '<div class="f"><label>Name *</label><input name="name" required value="' + esc(it.name) + '"></div><div class="row"><div class="f"><label>Price *</label><input name="price" type="number" step="0.01" min="0.01" required value="' + esc(it.price) + '"></div><div class="f"><label>Category</label><select name="category_id"><option value="">—</option>' + opts(cats, 'id', function (c) { return c.name; }, it.category_id) + '</select></div></div><label class="chk f"><input type="checkbox" name="is_active"' + (it.id && !it.is_active ? '' : ' checked') + '> On the menu</label>', 'restaurant.menuSave', it.id ? { id: it.id } : {});
+  }
+
+  function newOrderModal() {
+    Promise.all([API.call('frontdesk.inHouse')]).then(function (r) {
+      var inh = r[0], tables = S.menuCache.tables.filter(function (t) { return t.is_active; });
+      modal('New restaurant order', '<form id="nof"><div class="f"><label>Order for</label><select name="settlement_type" id="st"><option value="walk_in">Walk-in guest (pay now)</option><option value="room_charge">In-house guest (charge to room)</option></select></div><div class="f" id="tbl"><label>Table</label><select name="table_id"><option value="">—</option>' + opts(tables, 'id', function (t) { return t.name; }) + '</select></div><div class="f" id="rm" style="display:none"><label>Room</label><select name="folio_id">' + (inh.length ? opts(inh, 'folio_id', function (s) { return 'Room ' + s.room_number + ' — ' + s.guest_name; }) : '<option value="">No guests in house</option>') + '</select></div><div class="actions"><button type="submit">Start order</button></div></form>', function (m) {
+        var st = m.el.querySelector('#st'); st.onchange = function () { var rc = st.value === 'room_charge'; m.el.querySelector('#rm').style.display = rc ? '' : 'none'; m.el.querySelector('#tbl').style.display = rc ? 'none' : ''; };
+        m.el.querySelector('#nof').onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); if (d.settlement_type === 'room_charge') d.table_id = ''; busy(e.target.querySelector('button'), function () { return API.call('restaurant.create', d).then(function (o) { m.close(); refresh(); orderModal(o.id); }); }); };
+      });
+    }).catch(fail);
+  }
+
+  function orderModal(id, existing) {
+    API.call('restaurant.order', { order_id: Number(id) }).then(function (o) {
+      var m = existing || modal('Order', ''), tx = can('restaurant.transact'), editable = o.status === 'open' && tx;
+      var menu = S.menuCache.items.filter(function (i) { return i.is_active; });
+      var html = '<div class="kv"><b>Order</b><span>' + esc(o.order_number) + ' ' + pill(o.status) + '</span><b>For</b><span>' + esc(o.room_number ? 'Room ' + o.room_number + ' — ' + o.guest_name : (o.table_name || 'Walk-in')) + '</span></div>' +
+        table(['Item', '>Qty', '>Price', '>Amount', ''], o.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.unit_price) + '</td><td class="r">' + money(i.amount) + '</td><td class="actions">' + (editable ? '<button class="sm danger" data-rm="' + i.id + '">×</button>' : '') + '</td></tr>'; }), 'No items yet.') +
+        '<div class="kv" style="margin-top:8px"><b>Total</b><span class="total">' + money(o.total) + '</span></div>';
+      if (editable) {
+        html += '<form id="af" class="row" style="margin-top:12px;align-items:flex-end"><div class="f" style="flex:2 1 200px"><label>Add from menu</label><select name="menu_item_id"><option value="">— one-off item —</option>' + opts(menu, 'id', function (i) { return i.name + ' · ' + money(i.price); }) + '</select></div><div class="f" style="flex:0 1 80px"><label>Qty</label><input name="quantity" type="number" min="1" value="1"></div><div class="f" style="flex:0 0 auto"><button type="submit">Add</button></div></form>' +
+          '<div class="row" id="oneoff" style="display:none"><div class="f" style="flex:2 1 200px"><label>One-off description</label><input id="od"></div><div class="f"><label>Price</label><input id="op" type="number" step="0.01" min="0.01"></div></div>';
+      }
+      var btns = '';
+      if (tx && o.status === 'open') btns += '<button data-o="restaurant.send">Send to kitchen</button>';
+      if (tx && o.status === 'sent_to_kitchen') btns += '<button data-o="restaurant.served">Mark served</button>';
+      if (tx && ['open', 'sent_to_kitchen', 'served'].indexOf(o.status) !== -1 && o.items.length) {
+        btns += (o.settlement_type === 'walk_in' ? '<select id="pm" style="width:auto">' + opts(S.methods, 'id', function (x) { return x.name; }) + '</select>' : '') + '<button class="gold" data-o="restaurant.settle">' + (o.settlement_type === 'walk_in' ? 'Take payment' : 'Charge to room') + '</button>';
+      }
+      if (tx && ['open', 'sent_to_kitchen', 'served'].indexOf(o.status) !== -1) btns += '<button class="danger" data-o="restaurant.cancel">Cancel order</button>';
+      if (o.status === 'settled') btns += '<button class="sec" data-print="1">Print receipts (2 copies)</button>';
+      html += '<div class="actions" style="margin-top:14px">' + btns + '</div>';
+      m.setHtml(html);
+      var again = function () { orderModal(id, m); refresh(); };
+      var af = m.el.querySelector('#af');
+      if (af) {
+        var sel = af.querySelector('[name=menu_item_id]'), oo = m.el.querySelector('#oneoff'); sel.onchange = function () { oo.style.display = sel.value ? 'none' : ''; }; oo.style.display = sel.value ? 'none' : '';
+        af.onsubmit = function (e) { e.preventDefault(); var d = { order_id: o.id, menu_item_id: sel.value ? Number(sel.value) : null, quantity: af.quantity.value, description: m.el.querySelector('#od').value, unit_price: m.el.querySelector('#op').value }; busy(af.querySelector('button'), function () { return API.call('restaurant.addItem', d).then(again); }); };
+      }
+      Array.prototype.forEach.call(m.el.querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { busy(b, function () { return API.call('restaurant.removeItem', { item_id: Number(b.getAttribute('data-rm')) }).then(again); }); }; });
+      Array.prototype.forEach.call(m.el.querySelectorAll('[data-o]'), function (b) {
+        b.onclick = function () {
+          var act = b.getAttribute('data-o'), args = { order_id: o.id };
+          if (act === 'restaurant.settle' && o.settlement_type === 'walk_in') args.payment_method_id = Number(m.el.querySelector('#pm').value);
+          if (act === 'restaurant.cancel') { var r = prompt('Reason for cancelling this order:'); if (!r) return; args.reason = r; }
+          busy(b, function () { return API.call(act, args).then(function () { if (act === 'restaurant.settle') toast('Order settled.'); again(); }); });
+        };
+      });
+      var pr = m.el.querySelector('[data-print]'); if (pr) pr.onclick = function () { API.call('receipt.outlet', { order_id: o.id }).then(showReceipt).catch(fail); };
+    }).catch(fail);
+  }
+
   // ----- reports -----
-  VIEWS.reports = function (v) {
+  function periodReport(v) {
     var from = S.repFrom || addDays(today(), -29), to = S.repTo || today();
     v.innerHTML = '<div class="card"><form id="rp" class="row" style="align-items:flex-end"><div class="f"><label>From</label><input type="date" name="from" value="' + from + '"></div><div class="f"><label>To</label><input type="date" name="to" value="' + to + '"></div><div class="f" style="flex:0 0 auto"><button type="submit">Run report</button></div><div class="f" style="flex:0 0 auto"><button type="button" class="sec" id="pr">Print</button></div></form></div><div id="rout"></div>';
     v.querySelector('#pr').onclick = function () { window.print(); };
@@ -311,9 +392,65 @@
     }
     v.querySelector('#rp').onsubmit = function (e) { e.preventDefault(); from = e.target.from.value; to = e.target.to.value; S.repFrom = from; S.repTo = to; run().catch(fail); };
     return run();
+  }
+  VIEWS.reports = function (v) {
+    var tab = S.repTab || 'period';
+    v.innerHTML = '<div class="tabs"><button data-act="reptab" data-tab="period" class="' + (tab === 'period' ? 'on' : '') + '">Period report</button><button data-act="reptab" data-tab="monthly" class="' + (tab === 'monthly' ? 'on' : '') + '">Monthly financial report</button></div><div id="rt"></div>';
+    return (tab === 'monthly' ? monthlyReport : periodReport)(v.querySelector('#rt'));
   };
+  function monthlyReport(v) {
+    var month = S.repMonth || today().slice(0, 7);
+    v.innerHTML = '<div class="card"><form id="mf" class="row" style="align-items:flex-end"><div class="f"><label>Month</label><input type="month" name="month" value="' + month + '" required></div><div class="f" style="flex:0 0 auto"><button type="submit">Show</button></div><div class="f" style="flex:0 0 auto"><button type="button" class="sec" id="mp">Print</button></div></form></div><div id="mout"></div>';
+    v.querySelector('#mp').onclick = function () { window.print(); };
+    function run() {
+      return API.call('reports.monthly', { month: month }).then(function (r) {
+        var c = r.current, p = r.previous;
+        function delta(a, b) { var d = round(a - b); return '<td class="r ' + (d < 0 ? 'neg' : '') + '">' + (d > 0 ? '+' : '') + money(d) + '</td>'; }
+        function round(n) { return Math.round(n * 100) / 100; }
+        var rows = [['Payments received', c.payments_total, p.payments_total], ['Charges posted', c.charges_total, p.charges_total], ['Room revenue', c.room_revenue, p.room_revenue], ['Restaurant walk-in sales', c.restaurant_walkin_sales, p.restaurant_walkin_sales], ['Average room rate', c.average_rate, p.average_rate]].map(function (x) { return '<tr><td>' + x[0] + '</td><td class="r">' + money(x[1]) + '</td><td class="r">' + money(x[2]) + '</td>' + delta(x[1], x[2]) + '</tr>'; });
+        rows.push('<tr><td>Room nights sold</td><td class="r">' + c.room_nights + '</td><td class="r">' + p.room_nights + '</td><td class="r">' + (c.room_nights - p.room_nights) + '</td></tr>');
+        rows.push('<tr><td>Check-ins</td><td class="r">' + c.checkins_total + '</td><td class="r">' + p.checkins_total + '</td><td class="r">' + (c.checkins_total - p.checkins_total) + '</td></tr>');
+        var map = {}; p.checkins_per_room.forEach(function (x) { map[x.room_number] = x.checkins; });
+        var rooms = c.checkins_per_room.map(function (x) { var pv = map[x.room_number] || 0; return '<tr><td>' + esc(x.room_number) + '</td><td class="r">' + x.checkins + '</td><td class="r">' + pv + '</td><td class="r">' + (x.checkins - pv) + '</td></tr>'; });
+        function kv(o) { return Object.keys(o).sort().map(function (k) { return '<tr><td>' + esc(k.replace(/_/g, ' ')) + '</td><td class="r">' + money(o[k]) + '</td></tr>'; }); }
+        v.querySelector('#mout').innerHTML = '<div class="card"><h3>' + esc(S.hotel.name) + ' — monthly financial report, ' + esc(r.month) + ' <span class="muted">(compared with ' + esc(r.previous_month) + ')</span></h3>' + table(['Measure', '>' + r.month, '>' + r.previous_month, '>Change'], rows) + '</div>' +
+          '<div class="grid g2"><div class="card"><h3>Payments by method</h3>' + table(['Method', '>Net amount'], kv(c.payments_by_method), 'None.') + '</div><div class="card"><h3>Charges by service</h3>' + table(['Service', '>Amount'], kv(c.charges_by_service), 'None.') + '</div></div>' +
+          '<div class="card"><h3>Check-ins per room</h3>' + table(['Room', '>' + r.month, '>' + r.previous_month, '>Change'], rooms, 'No rooms.') + '</div>' + footerHtml(r.generated_at);
+      });
+    }
+    v.querySelector('#mf').onsubmit = function (e) { e.preventDefault(); month = e.target.month.value; S.repMonth = month; run().catch(fail); };
+    return run();
+  }
 
-  // ----- users & roles -----
+  // ----- receipts / invoice (print) -----
+  function footerHtml(when, who) { return '<div class="docfoot">Generated by <b>SmartGuest</b> · ' + esc(when || new Date().toLocaleString()) + (who ? ' · ' + esc(who) : '') + '</div>'; }
+  function showReceipt(d) {
+    var h = d.hotel || S.hotel || {}, head = '<div class="rc-head"><b>' + esc(h.name) + '</b><div class="muted">' + esc([h.address, h.phone].filter(Boolean).join(' · ')) + '</div></div>', sheets;
+    if (d.kind === 'restaurant') {
+      var o = d.order;
+      sheets = d.copies.map(function (copy) {
+        return '<div class="sheet">' + head + '<div class="copylabel">' + esc(copy) + '</div><div class="kv"><b>Receipt</b><span>' + esc(o.order_number) + '</span><b>Date</b><span>' + esc((o.settled_at || '').substr(0, 16)) + '</span>' + (o.table_name ? '<b>Table</b><span>' + esc(o.table_name) + '</span>' : '') + (o.room_number ? '<b>Room</b><span>' + esc(o.room_number) + ' — ' + esc(o.guest_name) + '</span>' : '') + '<b>Served by</b><span>' + esc(d.served_by) + '</span></div>' +
+          table(['Item', '>Qty', '>Price', '>Amount'], o.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.unit_price) + '</td><td class="r">' + money(i.amount) + '</td></tr>'; })) +
+          '<div class="kv" style="margin-top:8px"><b>Total</b><span class="total">' + money(o.total) + '</span><b>Settlement</b><span>' + esc(o.method_name) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
+      }).join('');
+    } else if (d.kind === 'payment') {
+      var p = d.payment;
+      sheets = d.copies.map(function (copy) {
+        return '<div class="sheet">' + head + (copy ? '<div class="copylabel">' + esc(copy) + '</div>' : '') + '<h4 style="text-align:center">' + (p.amount < 0 ? 'REFUND / REVERSAL RECEIPT' : 'PAYMENT RECEIPT') + '</h4><div class="kv"><b>Receipt</b><span>' + esc(p.receipt_number) + '</span><b>Date</b><span>' + esc(p.received_at.substr(0, 16)) + '</span><b>Guest</b><span>' + esc(d.guest.full_name) + '</span><b>Room</b><span>' + esc(d.room) + '</span><b>Folio</b><span>' + esc(d.folio_number) + '</span><b>Method</b><span>' + esc(d.method_name) + '</span>' + (p.notes ? '<b>Note</b><span>' + esc(p.notes) + '</span>' : '') + '<b>Received by</b><span>' + esc(d.received_by) + '</span></div>' +
+          '<div class="kv" style="margin-top:10px"><b>Amount</b><span class="total ' + (p.amount < 0 ? 'neg' : '') + '">' + money(p.amount) + '</span><b>Folio balance</b><span>' + money(d.balance) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
+      }).join('');
+    } else {
+      var f = d.folio;
+      sheets = '<div class="sheet">' + head + '<h4 style="text-align:center">INVOICE / GUEST STATEMENT</h4><div class="kv"><b>Folio</b><span>' + esc(f.folio.folio_number) + '</span><b>Guest</b><span>' + esc(f.guest.full_name) + '</span><b>Room</b><span>' + esc(f.room) + '</span><b>Check-in</b><span>' + esc(f.stay.checkin_at.substr(0, 16)) + '</span>' + (f.stay.checkout_at ? '<b>Check-out</b><span>' + esc(f.stay.checkout_at.substr(0, 16)) + '</span>' : '') + '</div>' +
+        table(['Description', '>Qty', '>Amount'], f.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.amount) + '</td></tr>'; }), 'No charges.') +
+        '<h4 style="margin-top:12px">Payments</h4>' + table(['Receipt', 'Date', '>Amount'], f.payments.map(function (p) { return '<tr><td>' + esc(p.receipt_number) + '</td><td>' + esc(p.received_at.substr(0, 10)) + '</td><td class="r">' + money(p.amount) + '</td></tr>'; }), 'No payments.') +
+        '<div class="kv" style="margin-top:10px"><b>Total charges</b><span>' + money(f.charges) + '</span><b>Total paid</b><span>' + money(f.paid) + '</span><b>Balance due</b><span class="total ' + (f.balance > 0 ? 'neg' : '') + '">' + money(f.balance) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
+    }
+    modal('Print preview', '<div class="actions noprint" style="margin-bottom:10px"><button data-doprint>Print</button></div><div class="sheets">' + sheets + '</div>', function (m) {
+      m.el.querySelector('[data-doprint]').onclick = function () { window.print(); };
+    });
+  }
+
   VIEWS.users = function (v) {
     return Promise.all([API.call('users.list'), API.call('roles.list')]).then(function (r) {
       var users = r[0], roles = r[1]; S.roleCache = roles; S.userCache = users;
@@ -383,6 +520,15 @@
     resetpw: function (b) { var pw = prompt('New password for this user (8+ characters, letters and numbers):'); if (pw) busy(b, function () { return API.call('users.resetPassword', { id: Number(b.getAttribute('data-id')), password: pw }).then(function () { toast('Password reset. The user was signed out.'); }); }); },
     newrole: function () { roleModal(); },
     editrole: function (b) { roleModal(S.roleCache.filter(function (r) { return String(r.id) === b.getAttribute('data-id'); })[0]); },
+    reptab: function (b) { S.repTab = b.getAttribute('data-tab'); refresh(); },
+    rtab: function (b) { S.rtab = b.getAttribute('data-tab'); refresh(); },
+    neworder: function () { newOrderModal(); },
+    openorder: function (b) { orderModal(b.getAttribute('data-id')); },
+    newmenu: function () { menuModal(); },
+    editmenu: function (b) { menuModal(S.menuCache.items.filter(function (i) { return String(i.id) === b.getAttribute('data-id'); })[0]); },
+    newtable: function () { simpleModal('Add table', '<div class="f"><label>Name *</label><input name="name" required placeholder="e.g. Table 5"></div>', 'restaurant.tableSave'); },
+    edittable: function (b) { var t = S.menuCache.tables.filter(function (x) { return String(x.id) === b.getAttribute('data-id'); })[0]; simpleModal('Edit table', '<div class="f"><label>Name *</label><input name="name" required value="' + esc(t.name) + '"></div><label class="chk f"><input type="checkbox" name="is_active"' + (t.is_active ? ' checked' : '') + '> In use</label>', 'restaurant.tableSave', { id: t.id }); },
+    newcat: function () { simpleModal('Add category', '<div class="f"><label>Name *</label><input name="name" required placeholder="e.g. Starters"></div>', 'restaurant.categorySave'); },
     chgurl: function () { connectScreen(); }
   };
   document.addEventListener('click', function (e) {
