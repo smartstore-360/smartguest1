@@ -18,9 +18,17 @@ jobs:
       url: ${{ steps.d.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Collect the website files
+        run: |
+          mkdir _site
+          for f in index.html styles.css api.js app.js config.js; do
+            if [ -f "$f" ]; then cp "$f" _site/; else echo "missing: $f"; fi
+          done
+          if [ ! -f _site/index.html ]; then cp Index.html _site/index.html; fi
+          ls -la _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: _site
       - id: d
         uses: actions/deploy-pages@v4
