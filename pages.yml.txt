@@ -1,0 +1,26 @@
+# Use THIS workflow if you uploaded the files flat to the top of your repository (no web/ folder).
+# Save it as .github/workflows/pages.yml (replace the old one).
+name: Deploy SmartGuest to GitHub Pages
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: true }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: '${{ steps.d.outputs.page_url }}' }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect site files
+        run: |
+          mkdir _site
+          if [ -f Index.html ] && [ ! -f index.html ]; then cp Index.html _site/index.html; else cp index.html _site/index.html; fi
+          for f in styles.css api.js app.js config.js sw.js manifest.webmanifest icon.svg; do
+            if [ -f "$f" ]; then cp "$f" _site/; else echo "missing $f"; fi
+          done
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+      - id: d
+        uses: actions/deploy-pages@v4
