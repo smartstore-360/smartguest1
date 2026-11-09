@@ -1,7 +1,7 @@
 /* SmartGuest front end - plain JavaScript, no build step. Works inside Apps Script and on GitHub Pages. */
 (function () {
   'use strict';
-  var APP_VERSION = '2026.11.09-c';
+  var APP_VERSION = '2026.11.09-d';
   var S = { user: null, hotel: null, methods: [], route: 'dashboard' };
   var $app = document.getElementById('app');
 
@@ -93,7 +93,7 @@
   // ---------- shell ----------
   var PAGES = [
     ['dashboard', 'Dashboard', 'frontdesk.view'], ['frontdesk', 'Front Desk', 'frontdesk.view'], ['reservations', 'Reservations', 'reservations.view'],
-    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'], ['roomservice', 'Room Service', 'room_service.view'], ['carrental', 'Car Rental', 'car_rental.view'], ['events', 'Events', 'events.view'], ['payroll', 'Payroll', 'payroll.view'], ['accounting', 'Accounting', 'accounting.view'],
+    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'], ['roomservice', 'Room Service', 'room_service.view'], ['carrental', 'Car Rental', 'car_rental.view'], ['events', 'Events', 'events.view'], ['payroll', 'Payroll', 'payroll.view'], ['accounting', 'Accounting', 'accounting.view'], ['refunds', 'Refunds', 'payments.reverse'], ['maintenance', 'Maintenance', 'maintenance.view'], ['rateplans', 'Rate Plans', 'rooms.view'],
     ['reports', 'Reports', 'reports.view'], ['users', 'Users & Roles', 'users.manage'], ['settings', 'Settings', null], ['audit', 'Audit Log', 'audit.view']
   ];
   function allowedPages() { return PAGES.filter(function (p) { return !p[2] || (Array.isArray(p[2]) ? p[2].some(can) : can(p[2])); }); }
@@ -253,7 +253,7 @@
         b.onclick = function () {
           var amt = prompt('Amount to reverse (max ' + b.getAttribute('data-max') + '):', b.getAttribute('data-max')); if (amt === null) return;
           var reason = prompt('Reason for the reversal:'); if (!reason) return;
-          busy(b, function () { return API.call('payments.reverse', { payment_id: Number(b.getAttribute('data-rev')), amount: amt, reason: reason }).then(function () { toast('Payment reversed.'); reload(); }); });
+          busy(b, function () { var pid = Number(b.getAttribute('data-rev')); return API.call('payments.reverse', { payment_id: pid, amount: amt, reason: reason }).then(function () { toast('Payment reversed.'); reload(); }, function (e) { if (!/need approval/.test(e.message)) throw e; return API.call('refunds.request', { payment_id: pid, amount: amt, reason: reason }).then(function () { toast('Refund request sent for approval.'); reload(); }); }); });
         };
       });
     }).catch(fail);
@@ -818,6 +818,79 @@
     carrcpt: function (b) { API.call('car.receipt', { booking_id: Number(b.getAttribute('data-id')) }).then(showReceipt).catch(fail); }
   });
   function carVehModal(x) { x = x || {}; formModal(x.id ? 'Edit vehicle' : 'Add vehicle', '<div class="f"><label>Name / plate *</label><input name="name" required value="' + esc(x.name) + '" placeholder="Toyota Corolla - GR-1234-20"></div><div class="row"><div class="f"><label>Type</label><input name="vehicle_type" value="' + esc(x.vehicle_type) + '"></div><div class="f"><label>Daily rate</label><input name="daily_rate" type="number" step="0.01" min="0" value="' + esc(x.daily_rate || 0) + '"></div></div>' + (x.id ? '<label class="chk f"><input type="checkbox" name="is_active"' + (x.is_active ? ' checked' : '') + '> Active</label>' : ''), function (d, m) { if (x.id) d.id = x.id; return API.call('car.vehicleSave', d).then(function () { m.close(); toast('Saved.'); refresh(); }); }); }
+
+
+  // ----- refunds (approval), maintenance, rate plans -----
+  var WALK_MODS = [['restaurant', 'Restaurant'], ['car', 'Car rental']].concat(Object.keys(OUTLET_NAMES()).map(function (k) { return ['outlet:' + k, OUTLET_NAMES()[k]]; }));
+  function OUTLET_NAMES() { return { bar: 'Bar', gift_shop: 'Gift Shop', business_centre: 'Business Centre', salon: 'Salon', spa: 'Spa', laundry: 'Laundry', gym: 'Gym', pool: 'Pool', parking: 'Parking', transport: 'Transport' }; }
+  VIEWS.refunds = function (v) {
+    var tab = S.rfTab || 'folio', tabs = [['folio', 'Guest-bill refunds'], ['walkin', 'Walk-in refunds']], canApprove = can('payments.approve_refunds');
+    return Promise.all([API.call('refunds.list'), API.call('walkinRefunds.list'), canApprove ? API.call('refunds.policy') : Promise.resolve(null)]).then(function (r) {
+      var fl = r[0], wl = r[1], pol = r[2];
+      function acts(x, kind) { return x.status === 'pending' && canApprove ? '<button class="sm" data-act="' + kind + 'ok" data-id="' + x.id + '">Approve</button> <button class="sm danger" data-act="' + kind + 'no" data-id="' + x.id + '">Reject</button>' : ''; }
+      var head = '<div class="card">' + (can('settings.manage') && pol ? '<label class="chk"><input type="checkbox" id="rfpol"' + (pol.require_refund_approval ? ' checked' : '') + '> Refunds on guest bills need a second person to approve</label><p class="muted">When on, the Reverse button sends a request instead. Nobody can approve their own request.</p>' : '') + '</div>';
+      if (tab === 'walkin') v.innerHTML = head + tabBar('rftab', tab, tabs) + '<div class="card">' + '<button class="sm gold" data-act="wrnew" style="float:right">+ Walk-in refund</button><h3>Walk-in refunds</h3>' + table(['Sale', 'Section', '>Amount', 'Via', 'Reason', 'Status', 'By', ''], wl.map(function (x) { return '<tr><td>' + esc(x.record_number) + '</td><td>' + esc(x.module_code.replace('outlet:', '')) + '</td><td class="r">' + money(x.amount) + '</td><td>' + esc(x.method_name) + '</td><td>' + esc(x.reason) + (x.review_notes ? '<div class="muted">' + esc(x.review_notes) + '</div>' : '') + '</td><td>' + pill(x.status) + '</td><td>' + esc(x.requested_by_name) + '</td><td class="actions">' + acts(x, 'wr') + '</td></tr>'; }), 'No walk-in refunds.') + '</div>';
+      else v.innerHTML = head + tabBar('rftab', tab, tabs) + '<div class="card"><h3>Guest-bill refund requests</h3><p class="muted">Request a refund from the guest\'s bill (Front Desk → open the folio → Reverse).</p>' + table(['Receipt', 'Folio', '>Amount', 'Reason', 'Status', 'By', ''], fl.map(function (x) { return '<tr><td>' + esc(x.receipt_number) + '</td><td>' + esc(x.folio_number) + '</td><td class="r">' + money(x.amount) + '</td><td>' + esc(x.reason) + (x.review_notes ? '<div class="muted">' + esc(x.review_notes) + '</div>' : '') + '</td><td>' + pill(x.status) + '</td><td>' + esc(x.requested_by_name) + '</td><td class="actions">' + acts(x, 'rf') + '</td></tr>'; }), 'No refund requests.') + '</div>';
+      var cb = v.querySelector('#rfpol'); if (cb) cb.onchange = function () { API.call('refunds.setPolicy', { require_refund_approval: cb.checked }).then(function () { toast(cb.checked ? 'Approval is now required.' : 'Approval is now off.'); }).catch(function (e) { cb.checked = !cb.checked; fail(e); }); };
+    });
+  };
+  function rfDo(b, action, extra, msg) { busy(b, function () { var d = { id: Number(b.getAttribute('data-id')) }; Object.assign(d, extra); return API.call(action, d).then(function () { toast(msg); refresh(); }); }); }
+  Object.assign(MORE, {
+    rftab: function (b) { S.rfTab = b.getAttribute('data-t'); refresh(); },
+    rfok: function (b) { if (confirm('Approve this refund and reverse the payment?')) rfDo(b, 'refunds.approve', {}, 'Approved and reversed.'); },
+    rfno: function (b) { var n = prompt('Reason for rejecting:'); if (n) rfDo(b, 'refunds.reject', { notes: n }, 'Rejected.'); },
+    wrok: function (b) { if (confirm('Approve this refund? It will be taken off that section\'s sales.')) rfDo(b, 'walkinRefunds.approve', {}, 'Approved.'); },
+    wrno: function (b) { var n = prompt('Reason for rejecting:'); if (n) rfDo(b, 'walkinRefunds.reject', { notes: n }, 'Rejected.'); },
+    wrnew: function () {
+      formModal('Walk-in refund request', '<div class="f"><label>Section *</label><select name="module">' + WALK_MODS.map(function (m) { return '<option value="' + m[0] + '">' + esc(m[1]) + '</option>'; }).join('') + '</select></div><div class="f"><label>Sale / order / booking number *</label><input name="number" required placeholder="e.g. RST-00012"></div><div class="row"><div class="f"><label>Refund amount *</label><input name="amount" type="number" step="0.01" min="0.01" required></div><div class="f"><label>Money goes back via *</label>' + methodSel('payment_method_id', true) + '</div></div><div class="f"><label>Reason *</label><input name="reason" required></div><p class="muted">Another person must approve it. Stock is not returned automatically.</p>',
+        function (d, m) { return API.call('walkinRefunds.request', d).then(function () { m.close(); toast('Request sent for approval.'); refresh(); }); });
+    }
+  });
+
+  VIEWS.maintenance = function (v) {
+    var st = S.mtSt || 'active';
+    return Promise.all([API.call('maintenance.list'), can('maintenance.manage') ? API.call('rooms.list') : Promise.resolve([]), can('maintenance.manage') ? API.call('maintenance.staff') : Promise.resolve([])]).then(function (r) {
+      var all = r[0]; S.mtRooms = r[1]; S.mtUsers = r[2];
+      var rows = all.filter(function (m) { return st === 'all' || (st === 'active' ? (m.status === 'open' || m.status === 'in_progress') : m.status === st); }), mg = can('maintenance.manage');
+      v.innerHTML = '<div class="card">' + (mg ? '<button class="sm gold" data-act="mtnew" style="float:right">+ New request</button>' : '') + '<h3>Maintenance requests</h3><div class="f" style="max-width:200px"><select id="mtst">' + [['active', 'Open & in progress'], ['resolved', 'Resolved'], ['cancelled', 'Cancelled'], ['all', 'All']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === st ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
+        table(['Ticket', 'Where', 'Issue', 'Priority', 'Status', '>Cost', 'Assigned', ''], rows.map(function (m) {
+          var open = m.status === 'open' || m.status === 'in_progress';
+          return '<tr><td>' + esc(m.ticket_number) + '<div class="muted">' + esc(m.reported_at) + '</div></td><td>' + (m.room_number ? 'Room ' + esc(m.room_number) : esc(m.equipment_name)) + (m.took_room_out_of_service ? '<div class="muted">room out of service</div>' : '') + '</td><td>' + esc(m.issue_description) + '</td><td>' + pill(m.priority) + '</td><td>' + pill(m.status) + '</td><td class="r">' + (m.cost ? money(m.cost) : '') + '</td><td>' + esc(m.assigned_name) + '</td><td class="actions">' + (mg && open ? '<button class="sm sec" data-act="mtas" data-id="' + m.id + '">Assign</button> <button class="sm sec" data-act="mtco" data-id="' + m.id + '">Cost</button> <button class="sm" data-act="mtok" data-id="' + m.id + '">Resolve</button> <button class="sm danger" data-act="mtx" data-id="' + m.id + '">Cancel</button>' : '') + '</td></tr>';
+        }), 'No maintenance requests here.') + '</div>';
+      v.querySelector('#mtst').onchange = function (e) { S.mtSt = e.target.value; refresh(); };
+    });
+  };
+  function mtDo(b, action, extra, msg) { busy(b, function () { var d = { id: Number(b.getAttribute('data-id')) }; Object.assign(d, extra); return API.call(action, d).then(function () { toast(msg); refresh(); }); }); }
+  Object.assign(MORE, {
+    mtok: function (b) { var n = prompt('What was done? (optional)', ''); if (n !== null) mtDo(b, 'maintenance.resolve', { notes: n }, 'Resolved.'); },
+    mtx: function (b) { if (confirm('Cancel this request?')) mtDo(b, 'maintenance.cancel', {}, 'Cancelled.'); },
+    mtco: function (b) { var c = prompt('Repair cost (recorded as an expense under Repairs):'); if (c !== null && c !== '') mtDo(b, 'maintenance.cost', { cost: c }, 'Cost recorded.'); },
+    mtas: function (b) {
+      var id = b.getAttribute('data-id');
+      modal('Assign request', '<form id="as"><div class="f"><label>Assign to</label><select name="assigned_to"><option value="">Nobody</option>' + opts(S.mtUsers, 'id', function (u) { return u.full_name; }) + '</select></div><div class="actions"><button type="submit">Save</button></div></form>', function (m) {
+        m.el.querySelector('#as').onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); d.id = Number(id); busy(e.target.querySelector('button'), function () { return API.call('maintenance.assign', d).then(function () { m.close(); toast('Assigned.'); refresh(); }); }); };
+      });
+    },
+    mtnew: function () {
+      var rooms = (S.mtRooms || []).filter(function (r) { return r.is_active; });
+      formModal('New maintenance request', '<div class="f"><label>Room</label><select name="room_id" id="mtr"><option value="">— equipment, not a room —</option>' + opts(rooms, 'id', function (r) { return r.room_number + ' (' + r.status + ')'; }) + '</select></div><div class="f" id="mte"><label>Equipment</label><input name="equipment_name" placeholder="e.g. Generator"></div><div class="f"><label>Issue *</label><textarea name="issue_description" required></textarea></div><div class="row"><div class="f"><label>Priority</label><select name="priority"><option>medium</option><option>low</option><option>high</option><option>urgent</option></select></div><label class="chk f"><input type="checkbox" name="take_out_of_service"> Take the room out of service</label></div>',
+        function (d, m) { return API.call('maintenance.create', d).then(function (r) { m.close(); toast('Created ' + r.ticket_number + '.'); refresh(); }); });
+    }
+  });
+
+  VIEWS.rateplans = function (v) {
+    return Promise.all([API.call('ratePlans.list'), API.call('roomTypes.list')]).then(function (r) {
+      var plans = r[0]; S.rpTypes = r[1]; S.rpPlans = plans; var mg = can('rate_plans.manage');
+      v.innerHTML = '<div class="card">' + (mg ? '<button class="sm gold" data-act="rpnew" style="float:right">+ New rate plan</button>' : '') + '<h3>Seasonal rate plans</h3><p class="muted">A plan sets the room rate for arrivals inside its dates. If plans overlap, the one that starts latest wins. Otherwise the room type\'s normal rate applies.</p>' +
+        table(['Plan', 'Room type', 'From', 'To', '>Rate', 'Active', ''], plans.map(function (p) { return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.room_type_name) + '</td><td>' + esc(p.start_date) + '</td><td>' + esc(p.end_date) + '</td><td class="r">' + money(p.rate) + '</td><td>' + (p.is_active ? 'Yes' : 'No') + '</td><td class="actions">' + (mg ? '<button class="sm sec" data-act="rpedit" data-id="' + p.id + '">Edit</button>' : '') + '</td></tr>'; }), 'No rate plans yet.') + '</div>';
+    });
+  };
+  function rpModal(p) {
+    p = p || {};
+    formModal(p.id ? 'Edit rate plan' : 'New rate plan', '<div class="f"><label>Plan name *</label><input name="name" required value="' + esc(p.name) + '" placeholder="Festive season"></div><div class="row"><div class="f"><label>Room type *</label><select name="room_type_id">' + opts(S.rpTypes, 'id', function (t) { return t.name + ' (normal ' + money(t.base_rate) + ')'; }, p.room_type_id) + '</select></div><div class="f"><label>Rate per night *</label><input name="rate" type="number" step="0.01" min="0" required value="' + esc(p.rate) + '"></div></div><div class="row"><div class="f"><label>From *</label><input type="date" name="start_date" required value="' + esc(p.start_date) + '"></div><div class="f"><label>To *</label><input type="date" name="end_date" required value="' + esc(p.end_date) + '"></div></div><label class="chk"><input type="checkbox" name="is_active"' + (p.id && !p.is_active ? '' : ' checked') + '> Active</label>',
+      function (d, m) { if (p.id) d.id = p.id; d.is_active = d.is_active ? 1 : 0; return API.call('ratePlans.save', d).then(function () { m.close(); toast('Saved.'); refresh(); }); });
+  }
+  Object.assign(MORE, { rpnew: function () { rpModal(); }, rpedit: function (b) { rpModal(S.rpPlans.filter(function (x) { return String(x.id) === b.getAttribute('data-id'); })[0]); } });
 
   // ----- events -----
   VIEWS.events = function (v) {
