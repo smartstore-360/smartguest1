@@ -1,6 +1,7 @@
 /* SmartGuest front end - plain JavaScript, no build step. Works inside Apps Script and on GitHub Pages. */
 (function () {
   'use strict';
+  var APP_VERSION = '2026.11.09-c';
   var S = { user: null, hotel: null, methods: [], route: 'dashboard' };
   var $app = document.getElementById('app');
 
@@ -128,7 +129,7 @@
     $app.innerHTML = '<div class="login classic"><div class="crest" aria-hidden="true"><svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="32" cy="32" r="24" fill="none" stroke="currentColor" stroke-width=".75"/><path d="M16 42V27l16-10 16 10v15h-9V32H25v10z" fill="currentColor"/><circle cx="32" cy="29" r="3" fill="#14213d"/></svg></div>' +
       '<h1 class="lg-name">SmartGuest</h1><div class="lg-sub">Hotel Management System</div><div class="orn"><i></i></div>' +
       '<div class="lg-card"><h2>Welcome</h2><p class="lg-hint">Please sign in to continue</p><form id="lf"><div class="f"><label>Username</label><input name="username" autocomplete="username" required autofocus></div><div class="f"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div><div class="err" id="le">' + esc(msg || '') + '</div><button type="submit" class="lg-btn">Sign in</button></form></div>' +
-      '<div class="lg-foot">Authorised staff only</div></div>';
+      '<div class="lg-foot">Authorised staff only<br><span style="opacity:.55">v' + APP_VERSION + '</span></div></div>';
     document.getElementById('lf').onsubmit = function (e) {
       e.preventDefault(); var f = e.target, b = f.querySelector('button'), le = document.getElementById('le'); b.disabled = true; le.textContent = '';
       API.call('auth.login', { username: f.username.value, password: f.password.value }).then(function (d) { API.setToken(d.token); S.user = d.user; return boot(); })
