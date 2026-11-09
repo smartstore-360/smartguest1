@@ -40,10 +40,59 @@
   }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modals.length) modals[modals.length - 1].querySelector('[data-close]').click(); });
 
+
+  // ---------- connection bar, offline queue ----------
+  function hhmm(ts) { var d = new Date(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+  function opLabel(p) {
+    var a = p.args || {};
+    switch (p.action) {
+      case 'payments.receive': return 'Payment ' + money(a.amount) + (a.notes ? ' — ' + a.notes : '');
+      case 'folio.addCharge': return 'Charge: ' + (a.description || '') + ' ' + money(Number(a.unit_amount || 0) * Number(a.quantity || 1));
+      case 'housekeeping.setStatus': return 'Room status → ' + String(a.status || '').replace(/_/g, ' ');
+      case 'expenses.create': return 'Expense: ' + (a.payee || '') + ' ' + money(a.amount);
+      case 'inventory.move': return 'Stock ' + (a.movement_type || '') + ' ' + (a.quantity || '');
+      case 'outlet.sell': return 'Sale at ' + String(a.outlet || '').replace(/_/g, ' ') + ' (' + (a.items || []).length + ' item(s))';
+      default: return p.action;
+    }
+  }
+  function renderNetbar() {
+    var el = document.getElementById('netbar'); if (!el) { el = document.createElement('div'); el.id = 'netbar'; document.body.appendChild(el); }
+    var st = API.status(), parts = [], cls = '';
+    if (!st.online) { cls = 'off'; parts.push('<b>Offline</b> — you can keep working' + (st.stale ? '. Showing what was saved at ' + hhmm(st.stale) : '')); }
+    else if (st.syncing) { cls = 'sync'; parts.push('Syncing…'); }
+    if (st.pending) { if (!cls) cls = 'sync'; parts.push(st.pending + ' change' + (st.pending > 1 ? 's' : '') + ' waiting to sync'); }
+    if (st.failed) { cls = 'bad'; parts.push('<b>' + st.failed + ' change' + (st.failed > 1 ? 's' : '') + ' could not be saved</b>'); }
+    if (S.updateReady) { if (!cls) cls = 'sync'; parts.push('A new version is ready'); }
+    if (!parts.length) { el.style.display = 'none'; return; }
+    el.className = cls; el.style.display = '';
+    el.innerHTML = '<span>' + parts.join(' · ') + '</span>' + (st.pending || st.failed ? ' <button class="sm sec" data-act="queue">Review</button>' : '') + (st.online && st.pending ? ' <button class="sm sec" data-act="syncnow">Sync now</button>' : '') + (S.updateReady ? ' <button class="sm sec" data-act="reload">Reload</button>' : '');
+  }
+  function queueModal() {
+    var q = API.queue();
+    var m = modal('Changes made on this device', (q.length ? '<p class="muted">These were saved while the server could not be reached. They are sent automatically, in order. If the server refuses one (for example the guest has since checked out) it stays here so nothing is lost silently.</p>' : '') +
+      table(['When', 'Change', 'Status', ''], q.map(function (p) { return '<tr><td>' + hhmm(p.at) + '</td><td>' + esc(opLabel(p)) + '</td><td>' + (p.status === 'failed' ? '<span class="pill bad">refused</span><div class="muted">' + esc(p.error) + '</div>' : '<span class="pill warn">waiting</span>') + '</td><td class="actions"><button class="sm sec" data-qdiscard="' + p.seq + '">Discard</button></td></tr>'; }), 'Nothing is waiting. Everything is saved on the server.') +
+      (q.length ? '<div class="actions"><button data-qretry>Try again now</button></div>' : ''), function (mm) {
+      Array.prototype.forEach.call(mm.el.querySelectorAll('[data-qdiscard]'), function (b) { b.onclick = function () { if (confirm('Discard this change? It will NOT be saved to the server.')) API.discard(Number(b.getAttribute('data-qdiscard'))).then(function () { mm.close(); queueModal(); }); }; });
+      var r = mm.el.querySelector('[data-qretry]'); if (r) r.onclick = function () { API.retryFailed().then(function () { mm.close(); queueModal(); }); };
+    });
+    return m;
+  }
+  function pendingOps(action) { return API.queue().filter(function (p) { return p.action === action && p.status === 'pending'; }); }
+  var lastQ = -1;
+  API.onStatus(function (st, type) {
+    renderNetbar();
+    if (type === 'queued') toast('Saved on this device. It will sync automatically when the connection is back.');
+    if (type === 'update') { S.updateReady = true; renderNetbar(); }
+    if (type === 'online') toast('Back online.');
+    var n = st.pending + st.failed;
+    if (type === 'synced' && S.user && n < lastQ && !modals.length) refresh();      // something was sent: show the real data
+    lastQ = n;
+  });
+
   // ---------- shell ----------
   var PAGES = [
     ['dashboard', 'Dashboard', 'frontdesk.view'], ['frontdesk', 'Front Desk', 'frontdesk.view'], ['reservations', 'Reservations', 'reservations.view'],
-    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'],
+    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'], ['roomservice', 'Room Service', 'room_service.view'], ['carrental', 'Car Rental', 'car_rental.view'], ['events', 'Events', 'events.view'], ['payroll', 'Payroll', 'payroll.view'], ['accounting', 'Accounting', 'accounting.view'],
     ['reports', 'Reports', 'reports.view'], ['users', 'Users & Roles', 'users.manage'], ['settings', 'Settings', null], ['audit', 'Audit Log', 'audit.view']
   ];
   function allowedPages() { return PAGES.filter(function (p) { return !p[2] || (Array.isArray(p[2]) ? p[2].some(can) : can(p[2])); }); }
@@ -85,14 +134,22 @@
   }
 
   function boot() {
-    return Promise.all([API.call('hotel.get'), API.call('payments.methods')]).then(function (r) {
-      S.hotel = r[0]; S.methods = r[1]; S.route = location.hash.slice(1) || 'dashboard'; render();
+    return API.call('app.boot').then(function (r) {
+      S.user = r.user; S.hotel = r.hotel; S.methods = r.methods; API.setUser(r.user.username); API.setWrites(r.writes);
+      S.route = location.hash.slice(1) || 'dashboard'; render(); warmCache();
     });
+  }
+  // Save the busiest screens on this device (one round trip) so they still open if the connection drops.
+  function warmCache() {
+    var want = [['rooms.list', 'rooms.view'], ['roomTypes.list', 'rooms.view'], ['frontdesk.arrivals', 'frontdesk.view'], ['frontdesk.inHouse', 'frontdesk.view'], ['housekeeping.board', 'housekeeping.view'], ['dashboard.get', 'frontdesk.view'],
+      ['guests.list', 'guests.view', { q: '' }], ['reservations.list', 'reservations.view', { status: '', q: '' }], ['restaurant.menu', 'restaurant.view'], ['inventory.data', 'inventory.view'], ['payments.methods', null]];
+    var list = want.filter(function (w) { return !w[1] || can(w[1]); }).map(function (w) { return [w[0], w[2] || {}]; });
+    setTimeout(function () { API.prefetch(list); }, 1200);
   }
   function start() {
     if (API.needsUrl()) return connectScreen();
     if (!API.token()) return loginScreen();
-    API.call('auth.me').then(function (u) { S.user = u; return boot(); }).catch(function (e) { if (e.message === 'NO_URL') return connectScreen(); loginScreen(e.message && !/session/i.test(e.message) ? 'Could not reach the server: ' + e.message : ''); });
+    API.loadWrites().then(function () { return boot(); }).catch(function (e) { if (e.message === 'NO_URL') return connectScreen(); loginScreen(e.message && !/session/i.test(e.message) ? 'Could not reach the server: ' + e.message : ''); });
   }
   API.onAuthLost = function () { S.user = null; loginScreen('Your session has expired. Please sign in again.'); };
 
@@ -178,8 +235,8 @@
       m.setHtml(html);
       var reload = function () { folioModal(stayId, m); refresh(); };
       var on = function (id, fn) { var el = m.el.querySelector(id); if (el) el.onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); busy(e.target.querySelector('button'), function () { return fn(d).then(function () { reload(); }); }); }; };
-      on('#pf', function (d) { d.folio_id = f.folio.id; d.idempotency_key = key; key = uuid(); return API.call('payments.receive', d).then(function (r) { toast('Payment received — receipt ' + r.receipt_number); }); });
-      on('#cf2', function (d) { d.folio_id = f.folio.id; return API.call('folio.addCharge', d).then(function () { toast('Charge added.'); }); });
+      on('#pf', function (d) { d.folio_id = f.folio.id; d.idempotency_key = key; key = uuid(); return API.call('payments.receive', d).then(function (r) { if (!r.queued) toast('Payment received — receipt ' + r.receipt_number); }); });
+      on('#cf2', function (d) { d.folio_id = f.folio.id; return API.call('folio.addCharge', d).then(function (r) { if (!r.queued) toast('Charge added.'); }); });
       on('#df', function (d) { d.folio_id = f.folio.id; return API.call('folio.discount', d).then(function () { toast('Discount applied.'); }); });
       Array.prototype.forEach.call(m.el.querySelectorAll('[data-rcpt]'), function (b) { b.onclick = function () { API.call('receipt.payment', { payment_id: Number(b.getAttribute('data-rcpt')) }).then(showReceipt).catch(fail); }; });
       var inv = m.el.querySelector('[data-invoice]'); if (inv) inv.onclick = function () { showReceipt({ kind: 'invoice', folio: f, copies: [''], printed_by: S.user.full_name, printed_at: new Date().toLocaleString(), hotel: S.hotel }); };
@@ -288,13 +345,14 @@
   // ----- housekeeping -----
   VIEWS.housekeeping = function (v) {
     return API.call('housekeeping.board').then(function (rooms) {
+      pendingOps('housekeeping.setStatus').forEach(function (p) { rooms.forEach(function (r) { if (r.id === Number(p.args.room_id)) r.status = p.args.status; }); });
       var upd = can('housekeeping.update'), statuses = ['available', 'dirty', 'cleaning', 'clean', 'inspected', 'maintenance', 'out_of_service', 'blocked'];
       v.innerHTML = '<div class="roomgrid">' + rooms.map(function (r) {
         var locked = r.status === 'occupied' || r.status === 'reserved' && false;
         return '<div class="rc"><b>' + esc(r.room_number) + '</b> <span class="muted">' + esc(r.room_type) + '</span><div style="margin:6px 0">' + pill(r.status) + '</div>' + (r.guest_name ? '<div class="muted" style="font-size:.8rem">' + esc(r.guest_name) + '</div>' : '') +
           (upd && !r.stay_id ? '<select data-room="' + r.id + '">' + statuses.map(function (s) { return '<option value="' + s + '"' + (s === r.status ? ' selected' : '') + '>' + s.replace(/_/g, ' ') + '</option>'; }).join('') + (statuses.indexOf(r.status) === -1 ? '<option selected>' + esc(r.status) + '</option>' : '') + '</select>' : '') + '</div>';
       }).join('') + '</div>';
-      v.querySelectorAll('[data-room]').forEach(function (s) { s.onchange = function () { s.disabled = true; API.call('housekeeping.setStatus', { room_id: Number(s.getAttribute('data-room')), status: s.value }).then(function () { toast('Room updated.'); refresh(); }).catch(function (e) { fail(e); refresh(); }); }; });
+      v.querySelectorAll('[data-room]').forEach(function (s) { s.onchange = function () { s.disabled = true; API.call('housekeeping.setStatus', { room_id: Number(s.getAttribute('data-room')), status: s.value }).then(function (r) { if (!r.queued) toast('Room updated.'); refresh(); }).catch(function (e) { fail(e); refresh(); }); }; });
     });
   };
 
@@ -410,7 +468,7 @@
         v.querySelector('#sellf').onsubmit = function (e) {
           e.preventDefault(); var d2 = formData(e.target);
           var payload = { outlet: cur, settlement_type: d2.settlement_type, payment_method_id: d2.settlement_type === 'walk_in' ? Number(d2.payment_method_id) : null, folio_id: d2.settlement_type === 'room_charge' ? Number(d2.folio_id) : null, customer_name: d2.customer_name, items: cart.map(function (l) { return { item_id: l.item_id || null, description: l.description, quantity: l.quantity, unit_price: l.unit_price }; }) };
-          busy(e.target.querySelector('button[type=submit]'), function () { return API.call('outlet.sell', payload).then(function (res) { S.cart[cur] = []; toast('Sale ' + res.sale_number + ' completed.'); refresh(); return API.call('outlet.receipt', { outlet: cur, sale_id: res.id }).then(showReceipt); }); });
+          busy(e.target.querySelector('button[type=submit]'), function () { return API.call('outlet.sell', payload).then(function (res) { S.cart[cur] = []; if (res.queued) { refresh(); return; } toast('Sale ' + res.sale_number + ' completed.'); refresh(); return API.call('outlet.receipt', { outlet: cur, sale_id: res.id }).then(showReceipt); }); });
         };
       }
     });
@@ -538,6 +596,14 @@
         return '<div class="sheet">' + head + (copy ? '<div class="copylabel">' + esc(copy) + '</div>' : '') + '<h4 style="text-align:center">' + (p.amount < 0 ? 'REFUND / REVERSAL RECEIPT' : 'PAYMENT RECEIPT') + '</h4><div class="kv"><b>Receipt</b><span>' + esc(p.receipt_number) + '</span><b>Date</b><span>' + esc(p.received_at.substr(0, 16)) + '</span><b>Guest</b><span>' + esc(d.guest.full_name) + '</span><b>Room</b><span>' + esc(d.room) + '</span><b>Folio</b><span>' + esc(d.folio_number) + '</span><b>Method</b><span>' + esc(d.method_name) + '</span>' + (p.notes ? '<b>Note</b><span>' + esc(p.notes) + '</span>' : '') + '<b>Received by</b><span>' + esc(d.received_by) + '</span></div>' +
           '<div class="kv" style="margin-top:10px"><b>Amount</b><span class="total ' + (p.amount < 0 ? 'neg' : '') + '">' + money(p.amount) + '</span><b>Folio balance</b><span>' + money(d.balance) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
       }).join('');
+    } else if (d.kind === 'simple') {
+      sheets = '<div class="sheet">' + head + '<h4 style="text-align:center">' + esc(d.title) + '</h4><div class="kv"><b>Receipt</b><span>' + esc(d.number) + '</span><b>Date</b><span>' + esc(d.date) + '</span>' + d.lines.map(function (l) { return '<b>' + esc(l[0]) + '</b><span>' + esc(l[1]) + '</span>'; }).join('') + '</div><div class="kv" style="margin-top:10px"><b>Amount</b><span class="total ' + (d.amount < 0 ? 'neg' : '') + '">' + money(d.amount) + '</span><b>Settlement</b><span>' + esc(d.method_name) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
+    } else if (d.kind === 'payslip') {
+      var L = d.line, st = d.staff || {}, row = function (a, b) { return '<tr><td>' + esc(a) + '</td><td class="r">' + money(b) + '</td></tr>'; };
+      sheets = '<div class="sheet">' + head + '<h4 style="text-align:center">PAYSLIP — ' + esc(d.run.period) + '</h4><div class="kv"><b>Employee</b><span>' + esc(L.staff_name) + '</span><b>Staff no.</b><span>' + esc(st.staff_number) + '</span><b>Job title</b><span>' + esc(L.job_title) + '</span>' + (st.ssnit_number ? '<b>SSNIT no.</b><span>' + esc(st.ssnit_number) + '</span>' : '') + (st.tin_number ? '<b>TIN</b><span>' + esc(st.tin_number) + '</span>' : '') + '</div>' +
+        table(['Earnings', '>Amount'], [row('Basic salary', L.basic), row('Allowances', L.allowances), row('Bonus / overtime', L.bonus), '<tr><td><b>Gross pay</b></td><td class="r"><b>' + money(L.gross) + '</b></td></tr>']) +
+        table(['Deductions', '>Amount'], [row('SSNIT (employee)', L.ssnit_employee), row('PAYE income tax', L.paye), row('Other deductions' + (L.deduction_note ? ' — ' + L.deduction_note : ''), L.other_deductions)]) +
+        '<div class="kv" style="margin-top:8px"><b>Net pay</b><span class="total">' + money(L.net) + '</span><b>Employer SSNIT (not deducted)</b><span>' + money(L.ssnit_employer) + '</span></div>' + footerHtml(d.printed_at, d.printed_by) + '</div>';
     } else {
       var f = d.folio;
       sheets = '<div class="sheet">' + head + '<h4 style="text-align:center">INVOICE / GUEST STATEMENT</h4><div class="kv"><b>Folio</b><span>' + esc(f.folio.folio_number) + '</span><b>Guest</b><span>' + esc(f.guest.full_name) + '</span><b>Room</b><span>' + esc(f.room) + '</span><b>Check-in</b><span>' + esc(f.stay.checkin_at.substr(0, 16)) + '</span>' + (f.stay.checkout_at ? '<b>Check-out</b><span>' + esc(f.stay.checkout_at.substr(0, 16)) + '</span>' : '') + '</div>' +
@@ -592,9 +658,220 @@
     });
   };
 
+  // ======================= Payroll, Room Service, Car Rental, Events, Accounting =======================
+  var MORE = {};
+  function methodSel(name, req) { return '<select name="' + name + '"' + (req ? ' required' : '') + '><option value="">Choose…</option>' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select>'; }
+  function inhSel(inh, name) { return '<select name="' + name + '">' + (inh.length ? opts(inh, 'folio_id', function (s) { return 'Room ' + s.room_number + ' — ' + s.guest_name; }) : '<option value="">No guests in house</option>') + '</select>'; }
+  function tabBar(act, cur, list) { return '<div class="tabs">' + list.map(function (t) { return '<button data-act="' + act + '" data-t="' + t[0] + '" class="' + (cur === t[0] ? 'on' : '') + '">' + esc(t[1]) + '</button>'; }).join('') + '</div>'; }
+  function yesNo(v) { return v ? 'Yes' : 'No'; }
+  function formModal(title, html, onSubmit, wide) {
+    return modal(title, '<form id="fm">' + html + '<div class="actions"><button type="submit">Save</button></div></form>', function (m) {
+      m.el.querySelector('#fm').onsubmit = function (e) { e.preventDefault(); busy(e.target.querySelector('button'), function () { return onSubmit(formData(e.target), m); }); };
+    });
+  }
+  function settleModal(title, total, isRoom, action, idKey, id, done) {
+    modal(title, '<p>Amount: <b>' + money(total) + '</b></p><form id="sm">' + (isRoom ? '<div class="f"><label>How</label><select name="mode" id="smm"><option value="charge_to_room">Charge to the guest\'s room bill</option><option value="pay_now">Charge to room and take payment now</option></select></div><div class="f" id="smp" style="display:none"><label>Payment method</label>' + methodSel('payment_method_id') + '</div>' : (total > 0 ? '<div class="f"><label>Payment method *</label>' + methodSel('payment_method_id', true) + '</div>' : '<p class="muted">Complimentary: nothing to collect.</p>')) + '<div class="actions"><button type="submit">Settle</button></div></form>', function (m) {
+      var mm = m.el.querySelector('#smm'); if (mm) mm.onchange = function () { m.el.querySelector('#smp').style.display = mm.value === 'pay_now' ? '' : 'none'; };
+      m.el.querySelector('#sm').onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); d[idKey] = id; busy(e.target.querySelector('button'), function () { return API.call(action, d).then(function () { m.close(); toast('Settled.'); done(); }); }); };
+    });
+  }
+
+  // ----- payroll -----
+  var PAGE_TABS = {};
+  VIEWS.payroll = function (v) {
+    var tab = S.prTab || 'runs';
+    var head = tabBar('prtab', tab, [['runs', 'Payroll runs'], ['staff', 'Staff'], ['settings', 'Rates & PAYE bands']]);
+    if (tab === 'staff') return API.call('payroll.staff').then(function (rows) {
+      S.prStaff = rows;
+      v.innerHTML = head + '<div class="card">' + (can('payroll.manage') ? '<button class="sm gold" data-act="prstaffnew" style="float:right">+ Add staff</button>' : '') + '<h3>Staff</h3>' + table(['No.', 'Name', 'Job title', '>Basic', '>Allowances', 'Exempt', 'Status', ''], rows.map(function (s) {
+        return '<tr><td>' + esc(s.staff_number) + '</td><td>' + esc(s.full_name) + '</td><td>' + esc(s.job_title) + '</td><td class="r">' + money(s.basic_salary) + '</td><td class="r">' + money(s.default_allowances) + '</td><td>' + (s.ssnit_exempt ? 'SSNIT ' : '') + (s.paye_exempt ? 'PAYE' : '') + '</td><td>' + (s.is_active ? '<span class="pill ok">active</span>' : '<span class="pill">inactive</span>') + '</td><td class="actions">' + (can('payroll.manage') ? '<button class="sm sec" data-act="prstaffedit" data-id="' + s.id + '">Edit</button>' : '') + '</td></tr>'; }), 'No staff yet.') + '</div>';
+    });
+    if (tab === 'settings') return API.call('payroll.settings').then(function (s) {
+      var ed = can('payroll.manage');
+      v.innerHTML = head + '<div class="card"><h3>Rates & PAYE bands</h3><form id="prs"><div class="row"><div class="f"><label>Employee SSNIT %</label><input name="ssnit_employee_rate" type="number" step="0.01" value="' + esc(s.ssnit_employee_rate) + '"' + (ed ? '' : ' disabled') + '></div><div class="f"><label>Employer SSNIT %</label><input name="ssnit_employer_rate" type="number" step="0.01" value="' + esc(s.ssnit_employer_rate) + '"' + (ed ? '' : ' disabled') + '></div></div>' +
+        '<div class="f"><label>PAYE bands: one per line as <code>width,rate%</code>; the last line may be <code>rest,rate</code></label><textarea name="paye_bands" rows="9"' + (ed ? '' : ' disabled') + '>' + esc(s.paye_bands) + '</textarea></div>' + (ed ? '<div class="actions"><button type="submit">Save</button></div>' : '') + '</form><p class="muted">SSNIT is worked out on basic pay. PAYE is worked out on gross pay minus the employee SSNIT. Changes apply to new runs and to Recalculate on a draft run.</p></div>';
+      var f = v.querySelector('#prs'); if (f) f.onsubmit = function (e) { e.preventDefault(); busy(f.querySelector('button'), function () { return API.call('payroll.settingsSave', formData(f)).then(function () { toast('Saved.'); }); }); };
+    });
+    return API.call('payroll.runs').then(function (rows) {
+      v.innerHTML = head + '<div class="card">' + (can('payroll.manage') ? '<button class="sm gold" data-act="prrunnew" style="float:right">+ New payroll run</button>' : '') + '<h3>Payroll runs</h3>' + table(['Run', 'Month', 'Status', '>Staff', '>Gross', '>Net pay', '>Cost to hotel', ''], rows.map(function (r) {
+        return '<tr><td>' + esc(r.run_number) + '</td><td>' + esc(r.period) + '</td><td>' + pill(r.status) + '</td><td class="r">' + r.totals.staff + '</td><td class="r">' + money(r.totals.gross) + '</td><td class="r">' + money(r.totals.net) + '</td><td class="r">' + money(r.totals.employer_cost) + '</td><td class="actions"><button class="sm sec" data-act="prrun" data-id="' + r.id + '">Open</button></td></tr>'; }), 'No payroll runs yet. Add your staff first, then start a run.') + '</div>';
+    });
+  };
+  function staffModal(s) {
+    s = s || {};
+    formModal(s.id ? 'Edit staff' : 'Add staff', '<div class="row"><div class="f"><label>Full name *</label><input name="full_name" required value="' + esc(s.full_name) + '"></div><div class="f"><label>Job title</label><input name="job_title" value="' + esc(s.job_title) + '"></div></div><div class="row"><div class="f"><label>Department</label><input name="department" value="' + esc(s.department) + '"></div><div class="f"><label>Phone</label><input name="phone" value="' + esc(s.phone) + '"></div></div>' +
+      '<div class="row"><div class="f"><label>Monthly basic salary *</label><input name="basic_salary" type="number" step="0.01" min="0" required value="' + esc(s.basic_salary) + '"></div><div class="f"><label>Monthly allowances</label><input name="default_allowances" type="number" step="0.01" min="0" value="' + esc(s.default_allowances || 0) + '"></div></div>' +
+      '<div class="row"><div class="f"><label>SSNIT number</label><input name="ssnit_number" value="' + esc(s.ssnit_number) + '"></div><div class="f"><label>TIN</label><input name="tin_number" value="' + esc(s.tin_number) + '"></div></div><div class="row"><div class="f"><label>Bank / MoMo details</label><input name="bank_details" value="' + esc(s.bank_details) + '"></div><div class="f"><label>Start date</label><input type="date" name="start_date" value="' + esc(s.start_date) + '"></div></div>' +
+      '<div class="row"><label class="chk f"><input type="checkbox" name="ssnit_exempt"' + (s.ssnit_exempt ? ' checked' : '') + '> Exempt from SSNIT</label><label class="chk f"><input type="checkbox" name="paye_exempt"' + (s.paye_exempt ? ' checked' : '') + '> Exempt from PAYE</label>' + (s.id ? '<label class="chk f"><input type="checkbox" name="is_active"' + (s.is_active ? ' checked' : '') + '> Active</label>' : '') + '</div>',
+      function (d, m) { if (s.id) d.id = s.id; return API.call('payroll.staffSave', d).then(function () { m.close(); toast('Saved.'); refresh(); }); });
+  }
+  function runModal(id) {
+    if (S.rm) { S.rm.close(); S.rm = null; }
+    API.call('payroll.run', { run_id: id }).then(function (r) {
+      var t = r.totals, draft = r.status === 'draft', mg = can('payroll.manage'), ap = can('payroll.approve');
+      var btn = function (a, label, cls) { return '<button class="sm ' + (cls || 'sec') + '" data-act="' + a + '" data-run="' + r.id + '">' + label + '</button> '; };
+      S.rm = modal('Payroll ' + r.run_number + ' — ' + r.period, '<div class="kv"><b>Status</b><span>' + pill(r.status) + '</span><b>Gross pay</b><span>' + money(t.gross) + '</span><b>SSNIT (employee + employer)</b><span>' + money(t.ssnit_total) + '</span><b>PAYE</b><span>' + money(t.paye) + '</span><b>Net pay to staff</b><span class="total">' + money(t.net) + '</span><b>Cost to hotel (net + SSNIT + PAYE)</b><span>' + money(t.employer_cost) + '</span></div>' +
+        (r.notes ? '<p class="muted">' + esc(r.notes) + '</p>' : '') +
+        '<div class="actions noprint" style="margin:10px 0">' + (draft && mg ? btn('prrecalc', 'Recalculate from staff list') + btn('pradd', 'Add missing staff') : '') + (draft && ap ? btn('prapprove', 'Approve', 'gold') : '') + (draft && mg ? btn('prdelete', 'Delete run') : '') + (r.status === 'approved' && ap ? btn('prunapprove', 'Back to draft') + btn('prpost', 'Post to Expenses', 'gold') : '') + (r.status === 'posted' && ap ? btn('prreverse', 'Reverse posting') : '') + '</div>' +
+        table(['Staff', '>Basic', '>Allow.', '>Bonus', '>Gross', '>SSNIT', '>PAYE', '>Other ded.', '>Net', ''], r.lines.map(function (l) {
+          return '<tr><td>' + esc(l.staff_name) + '<div class="muted">' + esc(l.job_title) + '</div></td><td class="r">' + money(l.basic) + '</td><td class="r">' + money(l.allowances) + '</td><td class="r">' + money(l.bonus) + '</td><td class="r">' + money(l.gross) + '</td><td class="r">' + money(l.ssnit_employee) + '</td><td class="r">' + money(l.paye) + (l.paye_override ? '*' : '') + '</td><td class="r">' + money(l.other_deductions) + '</td><td class="r"><b>' + money(l.net) + '</b></td><td class="actions"><button class="sm sec" data-act="prslip" data-line="' + l.id + '">Payslip</button>' + (draft && mg ? ' <button class="sm sec" data-act="predit" data-run="' + r.id + '" data-line="' + l.id + '">Edit</button> <button class="sm sec" data-act="prrm" data-run="' + r.id + '" data-line="' + l.id + '">Remove</button>' : '') + '</td></tr>'; }), 'No staff on this run.') +
+        '<p class="muted">* PAYE typed in by hand.</p>' + (r.expenses.length ? '<h4>Posted to Expenses</h4>' + table(['Expense', 'For', 'Payee', '>Amount', 'Status'], r.expenses.map(function (e) { return '<tr><td>' + esc(e.expense_number) + '</td><td>' + esc(e.kind) + '</td><td>' + esc(e.payee) + '</td><td class="r">' + money(e.amount) + '</td><td>' + pill(e.status) + '</td></tr>'; })) : ''),
+        function (m) { var close = m.close; m.close = function () { S.rm = null; close(); }; });
+      S.rm.el.parentNode.style.maxWidth = '1180px'; S.rm.el.parentNode.style.width = '96vw';
+    }).catch(fail);
+  }
+  function prDo(b, action, extra, msg) { var id = Number(b.getAttribute('data-run')); busy(b, function () { return API.call(action, Object.assign({ run_id: id }, extra || {})).then(function () { toast(msg || 'Done.'); runModal(id); if (S.route === 'payroll') refreshBehind(); }); }); }
+  function refreshBehind() { var v = document.getElementById('view'); if (v && VIEWS[S.route]) VIEWS[S.route](v).catch(fail); }
+  Object.assign(MORE, {
+    prtab: function (b) { S.prTab = b.getAttribute('data-t'); refresh(); },
+    prstaffnew: function () { staffModal(); },
+    prstaffedit: function (b) { staffModal(S.prStaff.filter(function (s) { return String(s.id) === b.getAttribute('data-id'); })[0]); },
+    prrunnew: function () { formModal('New payroll run', '<div class="f"><label>Pay month *</label><input type="month" name="period" required value="' + today().slice(0, 7) + '"></div><div class="f"><label>Notes</label><input name="notes"></div><p class="muted">Every active staff member is added with their salary and allowances. You can adjust bonuses and deductions before approving.</p>', function (d, m) { return API.call('payroll.runCreate', d).then(function (r) { m.close(); toast('Run created.'); refresh(); runModal(r.id); }); }); },
+    prrun: function (b) { runModal(b.getAttribute('data-id')); },
+    prrecalc: function (b) { prDo(b, 'payroll.recalculate', null, 'Recalculated.'); },
+    pradd: function (b) { var id = Number(b.getAttribute('data-run')); busy(b, function () { return API.call('payroll.addMissing', { run_id: id }).then(function (r) { toast(r.added + ' added.'); runModal(id); }); }); },
+    prapprove: function (b) { if (confirm('Approve this payroll? Figures can no longer be edited unless you take it back to draft.')) prDo(b, 'payroll.approve', null, 'Approved.'); },
+    prunapprove: function (b) { prDo(b, 'payroll.unapprove', null, 'Back to draft.'); },
+    prdelete: function (b) { if (confirm('Delete this draft payroll run?')) { var id = Number(b.getAttribute('data-run')); busy(b, function () { return API.call('payroll.runDelete', { run_id: id }).then(function () { if (S.rm) S.rm.close(); toast('Deleted.'); refresh(); }); }); } },
+    prpost: function (b) { var id = Number(b.getAttribute('data-run')); modal('Post payroll to Expenses', '<p>This records three expenses: net salaries, SSNIT and PAYE (zero amounts are skipped).</p><form id="pp"><div class="f"><label>Paid by *</label>' + methodSel('payment_method_id', true) + '</div><div class="actions"><button type="submit">Post</button></div></form>', function (m) {
+      m.el.querySelector('#pp').onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); d.run_id = id; busy(e.target.querySelector('button'), function () { return API.call('payroll.post', d).then(function (r) { m.close(); toast('Posted: ' + r.expenses.join(', ')); runModal(id); refreshBehind(); }); }); }; }); },
+    prreverse: function (b) { var r = prompt('Reason for reversing this posted payroll (its expenses will be voided):'); if (r) prDo(b, 'payroll.reverse', { reason: r }, 'Reversed.'); },
+    prslip: function (b) { API.call('payroll.payslip', { line_id: Number(b.getAttribute('data-line')) }).then(showReceipt).catch(fail); },
+    prrm: function (b) { if (confirm('Remove this person from the run?')) { var id = Number(b.getAttribute('data-run')); busy(b, function () { return API.call('payroll.removeLine', { line_id: Number(b.getAttribute('data-line')) }).then(function () { runModal(id); refreshBehind(); }); }); } },
+    predit: function (b) {
+      var id = Number(b.getAttribute('data-run')), lid = b.getAttribute('data-line');
+      API.call('payroll.run', { run_id: id }).then(function (r) { var l = r.lines.filter(function (x) { return String(x.id) === lid; })[0];
+        formModal('Pay for ' + l.staff_name, '<div class="row"><div class="f"><label>Allowances</label><input name="allowances" type="number" step="0.01" min="0" value="' + l.allowances + '"></div><div class="f"><label>Bonus / overtime</label><input name="bonus" type="number" step="0.01" min="0" value="' + l.bonus + '"></div></div><div class="row"><div class="f"><label>Other deductions</label><input name="other_deductions" type="number" step="0.01" min="0" value="' + l.other_deductions + '"></div><div class="f"><label>Deduction note</label><input name="deduction_note" value="' + esc(l.deduction_note) + '"></div></div><div class="f"><label>PAYE (leave empty to calculate)</label><input name="paye" type="number" step="0.01" min="0" value="' + (l.paye_override ? l.paye : '') + '"></div>',
+          function (d, m) { d.line_id = Number(lid); return API.call('payroll.lineSave', d).then(function () { m.close(); toast('Saved.'); runModal(id); refreshBehind(); }); }); }).catch(fail);
+    }
+  });
+
+  // ----- room service -----
+  VIEWS.roomservice = function (v) {
+    var tab = S.rsTab || 'orders', tabs = [['orders', 'Orders']]; if (can('room_service.manage')) tabs.push(['menu', 'Menu']);
+    return Promise.all([API.call('roomService.orders'), API.call('roomService.menu')]).then(function (r) {
+      var orders = r[0], menu = r[1]; S.rsMenu = menu;
+      if (tab === 'menu') v.innerHTML = tabBar('rstab', tab, tabs) + '<div class="card"><button class="sm gold" data-act="rsmenunew" style="float:right">+ Add item</button><h3>Room service menu</h3>' + table(['Item', 'Category', '>Price', 'Status', ''], menu.map(function (m) { return '<tr><td>' + esc(m.name) + '</td><td>' + esc(m.category) + '</td><td class="r">' + money(m.price) + '</td><td>' + (m.is_active ? '<span class="pill ok">on</span>' : '<span class="pill">off</span>') + '</td><td class="actions"><button class="sm sec" data-act="rsmenuedit" data-id="' + m.id + '">Edit</button></td></tr>'; }), 'No items yet.') + '</div>';
+      else v.innerHTML = tabBar('rstab', tab, tabs) + '<div class="card">' + (can('room_service.transact') ? '<button class="sm gold" data-act="rsnew" style="float:right">+ New order</button>' : '') + '<h3>Room service orders</h3>' + table(['Order', 'Room', 'Guest', 'Status', '>Total', ''], orders.map(function (o) { return '<tr><td>' + esc(o.order_number) + '<div class="muted">' + esc(o.created_at.substr(0, 16)) + '</div></td><td>' + esc(o.room_number) + '</td><td>' + esc(o.guest_name) + '</td><td>' + pill(o.status) + '</td><td class="r">' + money(o.total) + '</td><td class="actions"><button class="sm sec" data-act="rsopen" data-id="' + o.id + '">Open</button></td></tr>'; }), 'No orders yet.') + '</div>';
+    });
+  };
+  function rsModal(id) {
+    if (S.rsm) { S.rsm.close(); S.rsm = null; }
+    API.call('roomService.order', { order_id: id }).then(function (o) {
+      var tr = can('room_service.transact'), open = o.status === 'open', live = ['open', 'sent_to_kitchen', 'out_for_delivery', 'delivered'].indexOf(o.status) !== -1;
+      var B = function (a, l, c) { return '<button class="sm ' + (c || 'sec') + '" data-act="' + a + '" data-id="' + o.id + '">' + l + '</button> '; };
+      S.rsm = modal('Room service ' + o.order_number + ' — Room ' + o.room_number, '<div class="kv"><b>Guest</b><span>' + esc(o.guest_name) + '</span><b>Status</b><span>' + pill(o.status) + '</span></div>' +
+        table(['Item', '>Qty', '>Price', '>Amount', ''], o.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.unit_price) + '</td><td class="r">' + money(i.amount) + '</td><td>' + (open && tr ? '<button class="sm sec" data-act="rsrm" data-id="' + o.id + '" data-item="' + i.id + '">×</button>' : '') + '</td></tr>'; }), 'No items yet.') +
+        '<div class="kv" style="margin-top:8px"><b>Total</b><span class="total">' + money(o.total) + '</span></div>' +
+        (open && tr ? '<form id="ai" class="row" style="align-items:flex-end;margin-top:10px"><div class="f"><label>Menu item</label><select name="menu_item_id"><option value="">Other (type below)…</option>' + opts(S.rsMenu.filter(function (m) { return m.is_active; }), 'id', function (m) { return m.name + ' — ' + money(m.price); }) + '</select></div><div class="f"><label>Other item</label><input name="description" placeholder="description"></div><div class="f" style="max-width:100px"><label>Price</label><input name="unit_price" type="number" step="0.01" min="0.01"></div><div class="f" style="max-width:80px"><label>Qty</label><input name="quantity" type="number" min="1" value="1"></div><div class="f" style="flex:0 0 auto"><button type="submit">Add</button></div></form>' : '') +
+        (tr && live ? '<div class="actions" style="margin-top:12px">' + (open ? B('rssend', 'Send to kitchen', 'gold') : '') + (o.status === 'sent_to_kitchen' ? B('rsout', 'Out for delivery', 'gold') : '') + (o.status === 'out_for_delivery' ? B('rsdone', 'Mark delivered', 'gold') : '') + B('rssettle', 'Settle', 'gold') + B('rscancel', 'Cancel order') + '</div>' : ''),
+        function (m) { var cl = m.close; m.close = function () { S.rsm = null; cl(); }; var f = m.el.querySelector('#ai'); if (f) f.onsubmit = function (e) { e.preventDefault(); var d = formData(e.target); d.order_id = id; busy(f.querySelector('button'), function () { return API.call('roomService.addItem', d).then(function () { rsModal(id); }); }); }; });
+    }).catch(fail);
+  }
+  function rsStep(b, action, msg) { var id = Number(b.getAttribute('data-id')); busy(b, function () { return API.call(action, { order_id: id }).then(function () { toast(msg); rsModal(id); refreshBehind(); }); }); }
+  Object.assign(MORE, {
+    rstab: function (b) { S.rsTab = b.getAttribute('data-t'); refresh(); },
+    rsmenunew: function () { rsMenuModal(); }, rsmenuedit: function (b) { rsMenuModal(S.rsMenu.filter(function (m) { return String(m.id) === b.getAttribute('data-id'); })[0]); },
+    rsnew: function () { API.call('frontdesk.inHouse').then(function (inh) { formModal('New room service order', '<div class="f"><label>Room *</label>' + inhSel(inh, 'folio_id') + '</div><div class="f"><label>Notes</label><input name="notes"></div>', function (d, m) { return API.call('roomService.create', d).then(function (o) { m.close(); refresh(); rsModal(o.id); }); }); }).catch(fail); },
+    rsopen: function (b) { rsModal(b.getAttribute('data-id')); },
+    rsrm: function (b) { var id = Number(b.getAttribute('data-id')); busy(b, function () { return API.call('roomService.removeItem', { item_id: Number(b.getAttribute('data-item')) }).then(function () { rsModal(id); }); }); },
+    rssend: function (b) { rsStep(b, 'roomService.send', 'Sent to the kitchen.'); }, rsout: function (b) { rsStep(b, 'roomService.out', 'Out for delivery.'); }, rsdone: function (b) { rsStep(b, 'roomService.delivered', 'Delivered.'); },
+    rscancel: function (b) { if (confirm('Cancel this order?')) rsStep(b, 'roomService.cancel', 'Cancelled.'); },
+    rssettle: function (b) { var id = Number(b.getAttribute('data-id')); API.call('roomService.order', { order_id: id }).then(function (o) { settleModal('Settle ' + o.order_number, o.total, true, 'roomService.settle', 'order_id', id, function () { rsModal(id); refreshBehind(); }); }).catch(fail); }
+  });
+  function rsMenuModal(m) { m = m || {}; formModal(m.id ? 'Edit menu item' : 'Add menu item', '<div class="f"><label>Name *</label><input name="name" required value="' + esc(m.name) + '"></div><div class="row"><div class="f"><label>Category</label><input name="category" value="' + esc(m.category) + '"></div><div class="f"><label>Price *</label><input name="price" type="number" step="0.01" min="0.01" required value="' + esc(m.price) + '"></div></div>' + (m.id ? '<label class="chk f"><input type="checkbox" name="is_active"' + (m.is_active ? ' checked' : '') + '> Available</label>' : ''), function (d, mm) { if (m.id) d.id = m.id; return API.call('roomService.menuSave', d).then(function () { mm.close(); toast('Saved.'); refresh(); }); }); }
+
+  // ----- car rental -----
+  VIEWS.carrental = function (v) {
+    var tab = S.carTab || 'bookings', tabs = [['bookings', 'Bookings'], ['vehicles', 'Vehicles']];
+    return Promise.all([API.call('car.bookings'), API.call('car.vehicles')]).then(function (r) {
+      var bk = r[0], vh = r[1]; S.carVeh = vh;
+      if (tab === 'vehicles') v.innerHTML = tabBar('cartab', tab, tabs) + '<div class="card">' + (can('car_rental.manage') ? '<button class="sm gold" data-act="carvnew" style="float:right">+ Add vehicle</button>' : '') + '<h3>Fleet</h3>' + table(['Vehicle', 'Type', '>Daily rate', 'Status', ''], vh.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.vehicle_type) + '</td><td class="r">' + money(x.daily_rate) + '</td><td>' + (x.is_active ? '<span class="pill ok">active</span>' : '<span class="pill">inactive</span>') + '</td><td class="actions">' + (can('car_rental.manage') ? '<button class="sm sec" data-act="carvedit" data-id="' + x.id + '">Edit</button>' : '') + '</td></tr>'; }), 'No vehicles yet.') + '</div>';
+      else v.innerHTML = tabBar('cartab', tab, tabs) + '<div class="card">' + (can('car_rental.transact') ? '<button class="sm gold" data-act="carnew" style="float:right">+ New rental</button>' : '') + '<h3>Rental bookings</h3>' + table(['Booking', 'Vehicle', 'Renter', 'Pickup', 'Return', '>Amount', 'Status', ''], bk.map(function (b) {
+        return '<tr><td>' + esc(b.booking_number) + '</td><td>' + esc(b.vehicle_name) + '</td><td>' + esc(b.renter) + (b.room_number ? '<div class="muted">Room ' + esc(b.room_number) + '</div>' : '') + '</td><td>' + esc(b.pickup_at) + '</td><td>' + esc(b.return_at) + '</td><td class="r">' + money(b.amount) + '</td><td>' + pill(b.status) + '</td><td class="actions">' + (b.status === 'open' && can('car_rental.transact') ? '<button class="sm gold" data-act="carsettle" data-id="' + b.id + '" data-amt="' + b.amount + '" data-room="' + (b.settlement_type === 'room_charge' ? 1 : 0) + '">Settle</button> <button class="sm sec" data-act="carcancel" data-id="' + b.id + '">Cancel</button>' : '') + (b.status === 'settled' ? '<button class="sm sec" data-act="carrcpt" data-id="' + b.id + '">Receipt</button>' : '') + '</td></tr>'; }), 'No rentals yet.') + '</div>';
+    });
+  };
+  Object.assign(MORE, {
+    cartab: function (b) { S.carTab = b.getAttribute('data-t'); refresh(); },
+    carvnew: function () { carVehModal(); }, carvedit: function (b) { carVehModal(S.carVeh.filter(function (x) { return String(x.id) === b.getAttribute('data-id'); })[0]); },
+    carnew: function () {
+      var veh = S.carVeh.filter(function (x) { return x.is_active; }); if (!veh.length) return toast('Add a vehicle first.', true);
+      API.call('frontdesk.inHouse').then(function (inh) {
+        formModal('New car rental', '<div class="f"><label>Vehicle *</label><select name="vehicle_id">' + opts(veh, 'id', function (x) { return x.name + ' — ' + money(x.daily_rate) + '/day'; }) + '</select></div><div class="f"><label>Rented by</label><select name="settlement_type" id="cst"><option value="walk_in">Walk-in customer (pays at settlement)</option><option value="room_charge">In-house guest (charge to room)</option></select></div>' +
+          '<div class="f" id="cwi"><label>Customer name *</label><input name="customer_name"></div><div class="f" id="crm" style="display:none"><label>Room</label>' + inhSel(inh, 'folio_id') + '</div><div class="row"><div class="f"><label>Pickup *</label><input type="datetime-local" name="pickup_at" required></div><div class="f"><label>Return *</label><input type="datetime-local" name="return_at" required></div></div>' +
+          '<div class="row"><div class="f"><label>Driver licence no.</label><input name="driver_license_number"></div><div class="f"><label>Amount (empty = days × daily rate)</label><input name="amount" type="number" step="0.01" min="0"></div></div>',
+          function (d, m) { if (d.settlement_type === 'room_charge') d.customer_name = ''; else d.folio_id = ''; return API.call('car.create', d).then(function (b) { m.close(); toast('Booked ' + b.booking_number + ' for ' + money(b.amount) + '.'); refresh(); }); });
+        var s = document.getElementById('cst'); s.onchange = function () { var rc = s.value === 'room_charge'; document.getElementById('crm').style.display = rc ? '' : 'none'; document.getElementById('cwi').style.display = rc ? 'none' : ''; };
+      }).catch(fail);
+    },
+    carsettle: function (b) { settleModal('Settle rental', Number(b.getAttribute('data-amt')), b.getAttribute('data-room') === '1', 'car.settle', 'booking_id', Number(b.getAttribute('data-id')), refresh); },
+    carcancel: function (b) { if (confirm('Cancel this rental booking?')) busy(b, function () { return API.call('car.cancel', { booking_id: Number(b.getAttribute('data-id')) }).then(function () { toast('Cancelled.'); refresh(); }); }); },
+    carrcpt: function (b) { API.call('car.receipt', { booking_id: Number(b.getAttribute('data-id')) }).then(showReceipt).catch(fail); }
+  });
+  function carVehModal(x) { x = x || {}; formModal(x.id ? 'Edit vehicle' : 'Add vehicle', '<div class="f"><label>Name / plate *</label><input name="name" required value="' + esc(x.name) + '" placeholder="Toyota Corolla - GR-1234-20"></div><div class="row"><div class="f"><label>Type</label><input name="vehicle_type" value="' + esc(x.vehicle_type) + '"></div><div class="f"><label>Daily rate</label><input name="daily_rate" type="number" step="0.01" min="0" value="' + esc(x.daily_rate || 0) + '"></div></div>' + (x.id ? '<label class="chk f"><input type="checkbox" name="is_active"' + (x.is_active ? ' checked' : '') + '> Active</label>' : ''), function (d, m) { if (x.id) d.id = x.id; return API.call('car.vehicleSave', d).then(function () { m.close(); toast('Saved.'); refresh(); }); }); }
+
+  // ----- events -----
+  VIEWS.events = function (v) {
+    var tab = S.evTab || 'bookings', tabs = [['bookings', 'Bookings'], ['spaces', 'Spaces']];
+    return Promise.all([API.call('events.list'), API.call('events.spaces')]).then(function (r) {
+      var bk = r[0], sp = r[1]; S.evSp = sp;
+      if (tab === 'spaces') v.innerHTML = tabBar('evtab', tab, tabs) + '<div class="card">' + (can('events.manage') ? '<button class="sm gold" data-act="evsnew" style="float:right">+ Add space</button>' : '') + '<h3>Event spaces</h3>' + table(['Space', '>Capacity', '>Hourly', '>Daily', 'Status', ''], sp.map(function (s) { return '<tr><td>' + esc(s.name) + '<div class="muted">' + esc(s.description) + '</div></td><td class="r">' + esc(s.capacity === null ? '' : s.capacity) + '</td><td class="r">' + (s.hourly_rate === null ? '—' : money(s.hourly_rate)) + '</td><td class="r">' + (s.daily_rate === null ? '—' : money(s.daily_rate)) + '</td><td>' + (s.is_active ? '<span class="pill ok">active</span>' : '<span class="pill">inactive</span>') + '</td><td class="actions">' + (can('events.manage') ? '<button class="sm sec" data-act="evsedit" data-id="' + s.id + '">Edit</button>' : '') + '</td></tr>'; }), 'No spaces yet.') + '</div>';
+      else v.innerHTML = tabBar('evtab', tab, tabs) + '<div class="card">' + (can('events.transact') ? '<button class="sm gold" data-act="evnew" style="float:right">+ New booking</button>' : '') + '<h3>Event bookings</h3>' + table(['Booking', 'Client', 'Space', 'When', 'Status', '>Total', '>Balance', ''], bk.map(function (b) { return '<tr><td>' + esc(b.booking_number) + '</td><td>' + esc(b.client_name) + '<div class="muted">' + esc(b.client_company) + '</div></td><td>' + esc(b.space_name) + '</td><td>' + esc(b.event_date + (b.end_date ? ' → ' + b.end_date : '')) + '<div class="muted">' + esc(b.start_time + '–' + b.end_time) + '</div></td><td>' + pill(b.status) + '</td><td class="r">' + money(b.charges) + '</td><td class="r">' + (b.settlement_type === 'room_charge' ? '<span class="muted">room ' + esc(b.room_number) + '</span>' : money(b.balance)) + '</td><td class="actions"><button class="sm sec" data-act="evopen" data-id="' + b.id + '">Open</button></td></tr>'; }), 'No bookings yet.') + '</div>';
+    });
+  };
+  function evModal(id) {
+    if (S.evm) { S.evm.close(); S.evm = null; }
+    Promise.all([API.call('events.get', { booking_id: id })]).then(function (r) {
+      var b = r[0], tr = can('events.transact'), direct = b.settlement_type === 'direct', done = b.status === 'cancelled';
+      var B = function (a, l, c, extra) { return '<button class="sm ' + (c || 'sec') + '" data-act="' + a + '" data-id="' + b.id + '" ' + (extra || '') + '>' + l + '</button> '; };
+      S.evm = modal('Event ' + b.booking_number + ' — ' + b.client_name, '<div class="kv"><b>Space</b><span>' + esc(b.space_name) + '</span><b>When</b><span>' + esc(b.event_date + (b.end_date ? ' → ' + b.end_date : '') + ', ' + b.start_time + '–' + b.end_time) + '</span><b>Status</b><span>' + pill(b.status) + '</span>' + (b.purpose ? '<b>Purpose</b><span>' + esc(b.purpose) + '</span>' : '') + (b.client_phone ? '<b>Phone</b><span>' + esc(b.client_phone) + '</span>' : '') + '<b>Billing</b><span>' + (direct ? 'Billed directly' : 'Charged to room ' + esc(b.room_number)) + '</span></div>' +
+        '<h4>Charges</h4>' + table(['Item', '>Qty', '>Price', '>Amount'], b.items.map(function (i) { return '<tr><td>' + esc(i.description) + '</td><td class="r">' + i.quantity + '</td><td class="r">' + money(i.unit_price) + '</td><td class="r">' + money(i.amount) + '</td></tr>'; })) +
+        (direct ? '<h4>Payments</h4>' + table(['Receipt', 'Date', 'Method', '>Amount', ''], b.payments.map(function (p) { return '<tr><td>' + esc(p.payment_number) + '</td><td>' + esc(p.received_at.substr(0, 16)) + '</td><td>' + esc(p.method_name) + (p.amount < 0 ? ' <span class="muted">(' + esc(p.notes) + ')</span>' : '') + '</td><td class="r ' + (p.amount < 0 ? 'neg' : '') + '">' + money(p.amount) + '</td><td class="actions"><button class="sm sec" data-act="evrcpt" data-pay="' + p.id + '">Receipt</button>' + (tr && p.amount > 0 && p.status !== 'reversed' ? ' <button class="sm sec" data-act="evrev" data-id="' + b.id + '" data-pay="' + p.id + '">Reverse</button>' : '') + '</td></tr>'; }), 'No payments yet.') : '') +
+        '<div class="kv" style="margin-top:8px"><b>Total</b><span>' + money(b.charges) + '</span>' + (direct ? '<b>Paid</b><span>' + money(b.paid) + '</span><b>Balance</b><span class="total">' + money(b.balance) + '</span>' : '') + '</div>' +
+        (tr && !done ? '<div class="actions" style="margin-top:12px">' + (!b.folio_item_id ? B('evcharge', '+ Add charge') : '') + (direct && b.balance > 0 ? B('evpay', 'Take payment', 'gold') : '') + (!direct && !b.folio_item_id ? B('evroom', 'Charge to room', 'gold') : '') + '<select id="evst" style="width:auto" data-id="' + b.id + '">' + ['tentative', 'confirmed', 'in_progress', 'completed', 'cancelled'].map(function (s) { return '<option value="' + s + '"' + (s === b.status ? ' selected' : '') + '>' + s.replace('_', ' ') + '</option>'; }).join('') + '</select></div>' : (tr && done ? '<div class="actions" style="margin-top:12px"><select id="evst" style="width:auto" data-id="' + b.id + '"><option value="cancelled" selected>cancelled</option><option value="tentative">restore as tentative</option></select></div>' : '')),
+        function (m) { var cl = m.close; m.close = function () { S.evm = null; cl(); }; var s = m.el.querySelector('#evst'); if (s) s.onchange = function () { API.call('events.status', { booking_id: id, status: s.value }).then(function () { toast('Status updated.'); evModal(id); refreshBehind(); }).catch(function (e) { fail(e); evModal(id); }); }; });
+    }).catch(fail);
+  }
+  Object.assign(MORE, {
+    evtab: function (b) { S.evTab = b.getAttribute('data-t'); refresh(); },
+    evsnew: function () { evSpaceModal(); }, evsedit: function (b) { evSpaceModal(S.evSp.filter(function (x) { return String(x.id) === b.getAttribute('data-id'); })[0]); },
+    evopen: function (b) { evModal(Number(b.getAttribute('data-id'))); },
+    evnew: function () {
+      var sp = S.evSp.filter(function (x) { return x.is_active; }); if (!sp.length) return toast('Add an event space first.', true);
+      API.call('frontdesk.inHouse').then(function (inh) {
+        formModal('New event booking', '<div class="row"><div class="f"><label>Space *</label><select name="event_space_id">' + opts(sp, 'id', function (x) { return x.name; }) + '</select></div><div class="f"><label>Client name *</label><input name="client_name" required></div></div><div class="row"><div class="f"><label>Phone</label><input name="client_phone"></div><div class="f"><label>Company</label><input name="client_company"></div></div>' +
+          '<div class="row"><div class="f"><label>Date *</label><input type="date" name="event_date" required value="' + addDays(today(), 1) + '"></div><div class="f"><label>Last day (multi-day)</label><input type="date" name="end_date"></div><div class="f"><label>Start *</label><input type="time" name="start_time" required value="09:00"></div><div class="f"><label>End *</label><input type="time" name="end_time" required value="17:00"></div></div>' +
+          '<div class="row"><div class="f"><label>Rate type</label><select name="rate_type"><option value="daily">Daily</option><option value="hourly">Hourly</option></select></div><div class="f"><label>Rate (empty = space rate)</label><input name="rate" type="number" step="0.01" min="0"></div><div class="f"><label>Attendees</label><input name="attendees" type="number" min="0"></div></div><div class="f"><label>Purpose</label><input name="purpose"></div>' +
+          '<div class="f"><label>Billing</label><select name="settlement_type" id="est"><option value="direct">Bill the client directly</option><option value="room_charge">Charge to an in-house guest\'s room</option></select></div><div class="f" id="erm" style="display:none"><label>Room</label>' + inhSel(inh, 'folio_id') + '</div>',
+          function (d, m) { if (d.settlement_type !== 'room_charge') d.folio_id = ''; return API.call('events.create', d).then(function (b) { m.close(); toast('Booked ' + b.booking_number + '.'); refresh(); evModal(b.id); }); });
+        var s = document.getElementById('est'); s.onchange = function () { document.getElementById('erm').style.display = s.value === 'room_charge' ? '' : 'none'; };
+      }).catch(fail);
+    },
+    evcharge: function (b) { var id = Number(b.getAttribute('data-id')); formModal('Add charge', '<div class="f"><label>Description *</label><input name="description" required placeholder="e.g. Catering, projector"></div><div class="row"><div class="f"><label>Quantity</label><input name="quantity" type="number" min="1" value="1"></div><div class="f"><label>Unit price *</label><input name="unit_price" type="number" step="0.01" min="0.01" required></div></div>', function (d, m) { d.booking_id = id; return API.call('events.addCharge', d).then(function () { m.close(); evModal(id); refreshBehind(); }); }); },
+    evpay: function (b) { var id = Number(b.getAttribute('data-id')), key = uuid(); formModal('Take payment', '<div class="row"><div class="f"><label>Amount *</label><input name="amount" type="number" step="0.01" min="0.01" required></div><div class="f"><label>Method *</label>' + methodSel('payment_method_id', true) + '</div></div><div class="f"><label>Note</label><input name="notes" placeholder="e.g. deposit"></div>', function (d, m) { d.booking_id = id; d.idempotency_key = key; return API.call('events.pay', d).then(function (r) { m.close(); toast('Payment ' + r.payment_number + ' recorded.'); evModal(id); refreshBehind(); }); }); },
+    evrev: function (b) { var id = Number(b.getAttribute('data-id')), pid = Number(b.getAttribute('data-pay')); formModal('Reverse payment', '<div class="f"><label>Amount to reverse *</label><input name="amount" type="number" step="0.01" min="0.01" required></div><div class="f"><label>Reason *</label><input name="reason" required></div>', function (d, m) { d.payment_id = pid; return API.call('events.payReverse', d).then(function () { m.close(); toast('Reversed.'); evModal(id); refreshBehind(); }); }); },
+    evroom: function (b) { var id = Number(b.getAttribute('data-id')); if (confirm('Post the full booking total to the guest\'s room bill? No more charges can be added afterwards.')) busy(b, function () { return API.call('events.chargeToRoom', { booking_id: id }).then(function () { toast('Charged to room.'); evModal(id); refreshBehind(); }); }); },
+    evrcpt: function (b) { API.call('events.receipt', { payment_id: Number(b.getAttribute('data-pay')) }).then(showReceipt).catch(fail); }
+  });
+  function evSpaceModal(x) { x = x || {}; formModal(x.id ? 'Edit space' : 'Add space', '<div class="f"><label>Name *</label><input name="name" required value="' + esc(x.name) + '"></div><div class="row"><div class="f"><label>Capacity</label><input name="capacity" type="number" min="0" value="' + esc(x.capacity === null ? '' : x.capacity) + '"></div><div class="f"><label>Hourly rate</label><input name="hourly_rate" type="number" step="0.01" min="0" value="' + esc(x.hourly_rate === null ? '' : x.hourly_rate) + '"></div><div class="f"><label>Daily rate</label><input name="daily_rate" type="number" step="0.01" min="0" value="' + esc(x.daily_rate === null ? '' : x.daily_rate) + '"></div></div><div class="f"><label>Description</label><input name="description" value="' + esc(x.description) + '"></div>' + (x.id ? '<label class="chk f"><input type="checkbox" name="is_active"' + (x.is_active ? ' checked' : '') + '> Active</label>' : ''), function (d, m) { if (x.id) d.id = x.id; return API.call('events.spaceSave', d).then(function () { m.close(); toast('Saved.'); refresh(); }); }); }
+
+  // ----- accounting -----
+  VIEWS.accounting = function (v) {
+    var from = S.acFrom || today().slice(0, 8) + '01', to = S.acTo || today();
+    return API.call('accounting.get', { from: from, to: to }).then(function (a) {
+      function kv(o) { return Object.keys(o).sort().map(function (k) { return '<tr><td>' + esc(k) + '</td><td class="r">' + money(o[k]) + '</td></tr>'; }); }
+      v.innerHTML = '<div class="card"><form id="af" class="row" style="align-items:flex-end"><div class="f"><label>From</label><input type="date" name="from" value="' + a.from + '"></div><div class="f"><label>To</label><input type="date" name="to" value="' + a.to + '"></div><div class="f" style="flex:0 0 auto"><button type="submit">Show</button></div><div class="f" style="flex:0 0 auto"><button type="button" class="sec" onclick="window.print()">Print</button></div></form></div>' +
+        '<div class="grid g4"><div class="stat"><span>Income</span><b>' + money(a.total_income) + '</b></div><div class="stat"><span>Expenses</span><b>' + money(a.total_expenses) + '</b></div><div class="stat"><span>Net profit</span><b class="' + (a.net < 0 ? 'neg' : '') + '">' + money(a.net) + '</b></div><div class="stat"><span>Owed to the hotel</span><b>' + money(a.total_receivable) + '</b></div></div>' +
+        '<div class="grid g2" style="margin-top:16px"><div class="card"><h3>Income</h3>' + table(['Source', '>Amount'], kv(a.income), 'No income in this period.') + '</div><div class="card"><h3>Expenses</h3>' + table(['Category', '>Amount'], kv(a.expenses), 'No expenses in this period.') + '</div></div>' +
+        '<div class="card"><h3>Accounts receivable <span class="muted" style="font-weight:400">— guest folios and event-client balances still owed (today)</span></h3>' + table(['Who', 'Reference', 'Detail', '>Balance'], a.receivables.map(function (r) { return '<tr><td>' + esc(r.who) + '</td><td>' + esc(r.ref) + '</td><td>' + esc(r.detail) + '</td><td class="r">' + money(r.balance) + '</td></tr>'; }), 'Nobody owes the hotel anything.') + '</div>' +
+        '<p class="muted">Income counts charges posted to room bills (excluding tax), walk-in sales, walk-in car rentals and completed directly-billed events. Expenses are recorded as paid, so there is no payables list.</p>' + footerHtml();
+      v.querySelector('#af').onsubmit = function (e) { e.preventDefault(); S.acFrom = e.target.from.value; S.acTo = e.target.to.value; refresh(); };
+    });
+  };
+
   // ---------- click dispatch ----------
   var ACTS = {
-    logout: function () { API.call('auth.logout').catch(function () {}).then(function () { API.setToken(''); S.user = null; loginScreen(); }); },
+    logout: function () { API.call('auth.logout').catch(function () {}).then(function () { API.setToken(''); S.user = null; return API.wipe(); }).then(function () { loginScreen(); }); },
     fdtab: function (b) { S.fdTab = b.getAttribute('data-tab'); refresh(); },
     checkin: function (b) { checkinModal(b.getAttribute('data-rr'), b.getAttribute('data-label')); },
     checkout: function (b) { checkoutModal(b.getAttribute('data-stay')); },
@@ -643,8 +920,12 @@
     invitem: function (b) { invItemModal(b.getAttribute('data-id')); },
     invnew: function (b) { var k = b.getAttribute('data-k'); simpleModal('Add ' + k, '<div class="f"><label>Name *</label><input name="name" required></div>', 'inventory.' + k + 'Save'); },
     invedit: function (b) { var k = b.getAttribute('data-k'), x = S.inv[k + 's'].filter(function (r) { return String(r.id) === b.getAttribute('data-id'); })[0]; simpleModal('Edit ' + k, '<div class="f"><label>Name *</label><input name="name" required value="' + esc(x.name) + '"></div>', 'inventory.' + k + 'Save', { id: x.id }); },
-    chgurl: function () { connectScreen(); }
+    chgurl: function () { connectScreen(); },
+    queue: function () { queueModal(); },
+    syncnow: function (b) { busy(b, function () { return API.sync(); }); },
+    reload: function () { location.reload(); }
   };
+  Object.assign(ACTS, MORE);
   document.addEventListener('click', function (e) {
     var b = e.target.closest ? e.target.closest('[data-act]') : null;
     if (b && ACTS[b.getAttribute('data-act')]) { e.preventDefault(); ACTS[b.getAttribute('data-act')](b); }
