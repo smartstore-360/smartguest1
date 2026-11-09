@@ -105,7 +105,7 @@
       '</nav></aside><main class="main"><div class="top"><h2 id="title"></h2><span class="who">' + esc(S.user.full_name) + ' · ' + esc(S.user.role) + '</span><button class="sec sm" data-act="logout">Sign out</button></div><div id="view"></div></main></div>';
     var p = PAGES.filter(function (x) { return x[0] === S.route; })[0];
     document.getElementById('title').textContent = p ? p[1] : '';
-    document.title = (p ? p[1] + ' · ' : '') + 'SmartGuest';
+    document.title = 'SmartGuest'; document.body.classList.remove('is-login');
     var v = document.getElementById('view'); v.innerHTML = '<div class="empty">Loading…</div>';
     (VIEWS[S.route] || VIEWS.dashboard)(v).catch(function (e) { v.innerHTML = '<div class="card err">' + esc(e.message) + '</div>'; fail(e); });
   }
@@ -124,12 +124,20 @@
   }
 
   function loginScreen(msg) {
-    $app.innerHTML = '<div class="login"><div class="brand">SmartGuest<small>Hotel Management System</small></div><div class="card"><form id="lf"><div class="f"><label>Username</label><input name="username" autocomplete="username" required autofocus></div><div class="f"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div><div class="err" id="le">' + esc(msg || '') + '</div><button type="submit" style="width:100%">Sign in</button></form>' + (API.inGas ? '' : '<p class="muted" style="margin:12px 0 0;font-size:.8rem">Server: ' + esc(API.getUrl()) + ' · <a href="#" id="chg">change</a></p>') + '</div></div>';
-    var chg = document.getElementById('chg'); if (chg) chg.onclick = function (e) { e.preventDefault(); connectScreen(); };
+    document.body.classList.add('is-login'); document.title = 'SmartGuest';
+    $app.innerHTML = '<div class="login classic"><div class="crest" aria-hidden="true"><svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="32" cy="32" r="24" fill="none" stroke="currentColor" stroke-width=".75"/><path d="M16 42V27l16-10 16 10v15h-9V32H25v10z" fill="currentColor"/><circle cx="32" cy="29" r="3" fill="#14213d"/></svg></div>' +
+      '<h1 class="lg-name">SmartGuest</h1><div class="lg-sub">Hotel Management System</div><div class="orn"><i></i></div>' +
+      '<div class="lg-card"><h2>Welcome</h2><p class="lg-hint">Please sign in to continue</p><form id="lf"><div class="f"><label>Username</label><input name="username" autocomplete="username" required autofocus></div><div class="f"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div><div class="err" id="le">' + esc(msg || '') + '</div><button type="submit" class="lg-btn">Sign in</button></form></div>' +
+      '<div class="lg-foot">Authorised staff only</div></div>';
     document.getElementById('lf').onsubmit = function (e) {
-      e.preventDefault(); var f = e.target, b = f.querySelector('button'); b.disabled = true; document.getElementById('le').textContent = '';
+      e.preventDefault(); var f = e.target, b = f.querySelector('button'), le = document.getElementById('le'); b.disabled = true; le.textContent = '';
       API.call('auth.login', { username: f.username.value, password: f.password.value }).then(function (d) { API.setToken(d.token); S.user = d.user; return boot(); })
-        .catch(function (err) { if (err.message === 'NO_URL') return connectScreen(); document.getElementById('le').textContent = err.message; b.disabled = false; });
+        .catch(function (err) {
+          if (err.message === 'NO_URL') return connectScreen();
+          le.textContent = err.message; b.disabled = false;
+          // the server address is only offered when the server could not be reached at all
+          if (!API.inGas && /reach|took too long|Failed to fetch|Server returned|did not return data|offline/i.test(err.message)) { var a = document.createElement('a'); a.href = '#'; a.textContent = ' Change server address'; a.onclick = function (ev) { ev.preventDefault(); connectScreen(); }; le.appendChild(a); }
+        });
     };
   }
 
