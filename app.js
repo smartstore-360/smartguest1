@@ -1,7 +1,7 @@
 /* SmartGuest front end - plain JavaScript, no build step. Works inside Apps Script and on GitHub Pages. */
 (function () {
   'use strict';
-  var APP_VERSION = '2026.11.09-d';
+  var APP_VERSION = '2026.11.09-f';
   var S = { user: null, hotel: null, methods: [], route: 'dashboard' };
   var $app = document.getElementById('app');
 
@@ -93,7 +93,7 @@
   // ---------- shell ----------
   var PAGES = [
     ['dashboard', 'Dashboard', 'frontdesk.view'], ['frontdesk', 'Front Desk', 'frontdesk.view'], ['reservations', 'Reservations', 'reservations.view'],
-    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'], ['roomservice', 'Room Service', 'room_service.view'], ['carrental', 'Car Rental', 'car_rental.view'], ['events', 'Events', 'events.view'], ['payroll', 'Payroll', 'payroll.view'], ['accounting', 'Accounting', 'accounting.view'], ['refunds', 'Refunds', 'payments.reverse'], ['maintenance', 'Maintenance', 'maintenance.view'], ['rateplans', 'Rate Plans', 'rooms.view'],
+    ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'], ['roomservice', 'Room Service', 'room_service.view'], ['carrental', 'Car Rental', 'car_rental.view'], ['events', 'Events', 'events.view'], ['payroll', 'Payroll', 'payroll.view'], ['accounting', 'Accounting', 'accounting.view'], ['refunds', 'Refunds', 'payments.reverse'], ['maintenance', 'Maintenance', 'maintenance.view'], ['followups', 'Open Orders', 'followups.manage'], ['rateplans', 'Rate Plans', 'rooms.view'],
     ['reports', 'Reports', 'reports.view'], ['users', 'Users & Roles', 'users.manage'], ['settings', 'Settings', null], ['audit', 'Audit Log', 'audit.view']
   ];
   function allowedPages() { return PAGES.filter(function (p) { return !p[2] || (Array.isArray(p[2]) ? p[2].some(can) : can(p[2])); }); }
@@ -101,7 +101,7 @@
   function render() {
     var pages = allowedPages();
     if (!pages.some(function (p) { return p[0] === S.route; })) S.route = pages.length ? pages[0][0] : 'settings';
-    $app.innerHTML = '<div class="shell"><aside class="side"><div class="brand">SmartGuest<small>Hotel Management System</small></div><div class="hotelname">' + esc(S.hotel ? S.hotel.name : '') + '</div><nav class="nav">' +
+    $app.innerHTML = '<div class="shell"><aside class="side">' + logoImg('side-logo') + '<div class="brand">SmartGuest<small>Hotel Management System</small></div><div class="hotelname">' + esc(S.hotel ? S.hotel.name : '') + '</div><nav class="nav">' +
       pages.map(function (p) { return '<a href="#' + p[0] + '" class="' + (p[0] === S.route ? 'on' : '') + '">' + esc(p[1]) + '</a>'; }).join('') +
       '</nav></aside><main class="main"><div class="top"><h2 id="title"></h2><span class="who">' + esc(S.user.full_name) + ' · ' + esc(S.user.role) + '</span><button class="sec sm" data-act="logout">Sign out</button></div><div id="view"></div></main></div>';
     var p = PAGES.filter(function (x) { return x[0] === S.route; })[0];
@@ -124,12 +124,24 @@
     };
   }
 
+
+  // ----- branding: logo + colours (kept on this device so the sign-in page looks right before anyone logs in) -----
+  function shade(hex, f) { var n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; function m(x) { return Math.max(0, Math.min(255, Math.round(x * f))); } return '#' + [m(r), m(g), m(b)].map(function (x) { return (x < 16 ? '0' : '') + x.toString(16); }).join(''); }
+  function applyBrand(b) {
+    b = b || {}; S.brand = b; var st = document.documentElement.style;
+    if (b.color) st.setProperty('--navy', b.color); else st.removeProperty('--navy');
+    if (b.accent) { st.setProperty('--accent', b.accent); st.setProperty('--accent-strong', shade(b.accent, .62)); } else { st.removeProperty('--accent'); st.removeProperty('--accent-strong'); }
+    try { localStorage.setItem('sg_brand', JSON.stringify(b)); } catch (e) {}
+  }
+  try { applyBrand(JSON.parse(localStorage.getItem('sg_brand') || '{}')); } catch (e) { S.brand = {}; }
+  function logoImg(cls) { return S.brand && S.brand.logo ? '<img class="' + cls + '" src="' + S.brand.logo + '" alt="">' : ''; }
   function loginScreen(msg) {
     document.body.classList.add('is-login'); document.title = 'SmartGuest';
-    $app.innerHTML = '<div class="login classic"><div class="crest" aria-hidden="true"><svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="32" cy="32" r="24" fill="none" stroke="currentColor" stroke-width=".75"/><path d="M16 42V27l16-10 16 10v15h-9V32H25v10z" fill="currentColor"/><circle cx="32" cy="29" r="3" fill="#14213d"/></svg></div>' +
-      '<h1 class="lg-name">SmartGuest</h1><div class="lg-sub">Hotel Management System</div><div class="orn"><i></i></div>' +
+    $app.innerHTML = '<div class="login classic"><div class="crest" id="lcrest" aria-hidden="true">' + logoImg('lg-logo') + (S.brand && S.brand.logo ? '' : '<svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="32" cy="32" r="24" fill="none" stroke="currentColor" stroke-width=".75"/><path d="M16 42V27l16-10 16 10v15h-9V32H25v10z" fill="currentColor"/><circle cx="32" cy="29" r="3" fill="#14213d"/></svg>') + '</div>' +
+      '<h1 class="lg-name">SmartGuest</h1><div class="lg-sub" id="lsub">' + esc((S.brand && (S.brand.tagline || S.brand.name)) || 'Hotel Management System') + '</div><div class="orn"><i></i></div>' +
       '<div class="lg-card"><h2>Welcome</h2><p class="lg-hint">Please sign in to continue</p><form id="lf"><div class="f"><label>Username</label><input name="username" autocomplete="username" required autofocus></div><div class="f"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div><div class="err" id="le">' + esc(msg || '') + '</div><button type="submit" class="lg-btn">Sign in</button></form></div>' +
       '<div class="lg-foot">Authorised staff only<br><span style="opacity:.55">v' + APP_VERSION + '</span></div></div>';
+    API.call('app.brand').then(function (b) { if (!document.getElementById('lcrest')) return; applyBrand(b); var c = document.getElementById('lcrest'); if (b.logo) c.innerHTML = logoImg('lg-logo'); document.getElementById('lsub').textContent = b.tagline || b.name || 'Hotel Management System'; }).catch(function () {});
     document.getElementById('lf').onsubmit = function (e) {
       e.preventDefault(); var f = e.target, b = f.querySelector('button'), le = document.getElementById('le'); b.disabled = true; le.textContent = '';
       API.call('auth.login', { username: f.username.value, password: f.password.value }).then(function (d) { API.setToken(d.token); S.user = d.user; return boot(); })
@@ -144,7 +156,7 @@
 
   function boot() {
     return API.call('app.boot').then(function (r) {
-      S.user = r.user; S.hotel = r.hotel; S.methods = r.methods; API.setUser(r.user.username); API.setWrites(r.writes);
+      S.user = r.user; S.hotel = r.hotel; if (r.brand) applyBrand(r.brand); S.methods = r.methods; API.setUser(r.user.username); API.setWrites(r.writes);
       S.route = location.hash.slice(1) || 'dashboard'; render(); warmCache();
     });
   }
@@ -503,7 +515,7 @@
           return '<tr><td><b>' + esc(i.name) + '</b></td><td>' + esc(i.store) + '</td><td class="r">' + i.quantity + ' <span class="muted">' + esc(i.unit) + '</span></td><td style="min-width:120px">' + meter(i) + '<div class="muted" style="font-size:.72rem">reorder at ' + i.reorder_level + '</div></td><td><span class="stk-pill ' + i.status + '">' + STK[i.status] + '</span></td><td class="actions">' + (tx ? '<button class="sm sec" data-act="invmove" data-id="' + i.id + '">Move stock</button>' : '') + '</td></tr>'; }), 'No items match.') + '</div>';
       var moves = '<div class="card">' + table(['When', 'Item', 'Type', '>Change', '>Balance', 'By', 'Note'], d.movements.map(function (m) {
         return '<tr><td class="muted" style="white-space:nowrap">' + esc(m.created_at.substr(0, 16)) + '</td><td>' + esc(m.item) + '</td><td>' + esc(m.movement_type) + '</td><td class="r ' + (m.quantity < 0 ? 'neg' : '') + '">' + (m.quantity > 0 ? '+' : '') + m.quantity + '</td><td class="r">' + m.balance_after + '</td><td>' + esc(m.by) + '</td><td class="muted">' + esc(m.notes) + '</td></tr>'; }), 'No stock movements yet.') + '</div>';
-      var setup = '<div class="grid g2"><div class="card"><h3>Stores <button class="sm gold" data-act="invnew" data-k="store" style="float:right">+ Add</button></h3>' + table(['Store', ''], d.stores.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="actions"><button class="sm sec" data-act="invedit" data-k="store" data-id="' + x.id + '">Edit</button></td></tr>'; }), 'No stores yet.') + '</div>' +
+      var setup = (mg ? '<div class="card"><button class="sm gold" data-act="stklinks">Link menu items to stock</button> <span class="muted">Selling a linked item takes stock off automatically.</span></div>' : '') + '<div class="grid g2"><div class="card"><h3>Stores <button class="sm gold" data-act="invnew" data-k="store" style="float:right">+ Add</button></h3>' + table(['Store', ''], d.stores.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="actions"><button class="sm sec" data-act="invedit" data-k="store" data-id="' + x.id + '">Edit</button></td></tr>'; }), 'No stores yet.') + '</div>' +
         '<div class="card"><h3>Units <button class="sm gold" data-act="invnew" data-k="unit" style="float:right">+ Add</button></h3>' + table(['Unit', ''], d.units.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="actions"><button class="sm sec" data-act="invedit" data-k="unit" data-id="' + x.id + '">Edit</button></td></tr>'; }), 'No units yet.') + '</div></div>' +
         '<div class="card"><h3>Items <button class="sm gold" data-act="invitem" style="float:right">+ Add item</button></h3>' + table(['Item', 'Store', 'Unit', '>Reorder level', ''], d.items.map(function (i) { return '<tr><td>' + esc(i.name) + (i.is_active ? '' : ' <span class="pill">off</span>') + '</td><td>' + esc(i.store) + '</td><td>' + esc(i.unit) + '</td><td class="r">' + i.reorder_level + '</td><td class="actions"><button class="sm sec" data-act="invitem" data-id="' + i.id + '">Edit</button></td></tr>'; }), 'No items yet.') + '</div>';
       v.innerHTML = '<div class="tabs"><button data-act="invtab" data-t="stock" class="' + (tab === 'stock' ? 'on' : '') + '">Stock levels</button><button data-act="invtab" data-t="moves" class="' + (tab === 'moves' ? 'on' : '') + '">Movements</button>' + (mg ? '<button data-act="invtab" data-t="setup" class="' + (tab === 'setup' ? 'on' : '') + '">Setup</button>' : '') + '</div>' + (tab === 'moves' ? moves : tab === 'setup' && mg ? setup : stock);
@@ -530,9 +542,10 @@
       S.expCats = d.categories;
       v.innerHTML = '<div class="card"><form id="ef" class="row" style="align-items:flex-end"><div class="f"><label>From</label><input type="date" name="from" value="' + from + '"></div><div class="f"><label>To</label><input type="date" name="to" value="' + to + '"></div><div class="f" style="flex:0 0 auto"><button type="submit" class="sec">Show</button></div>' +
         (can('expenses.create') ? '<div class="f" style="flex:0 0 auto"><button type="button" class="gold" data-act="newexp">+ Record expense</button></div><div class="f" style="flex:0 0 auto"><button type="button" class="sec" data-act="newexpcat">+ Category</button></div>' : '') + '</form>' +
-        '<div class="kv" style="margin-bottom:10px"><b>Total (excluding voided)</b><span class="total">' + money(d.total) + '</span></div>' +
+        (can('settings.manage') ? '<label class="chk"><input type="checkbox" id="exppol"' + (d.need_approval ? ' checked' : '') + '> New expenses need approval, then payment (otherwise they are recorded as paid at once)</label>' : '') + (d.payables_count ? '<div class="kv" style="margin-bottom:6px"><b>Waiting to be paid (' + d.payables_count + ')</b><span class="total">' + money(d.payables_total) + '</span></div>' : '') + '<div class="kv" style="margin-bottom:10px"><b>Total paid (excluding voided)</b><span class="total">' + money(d.total) + '</span></div>' +
         table(['Number', 'Date', 'Category', 'Payee', 'Description', '>Amount', 'Status', ''], d.expenses.map(function (e) {
-          return '<tr><td>' + esc(e.expense_number) + '</td><td>' + esc(e.expense_date) + '</td><td>' + esc(e.category) + '</td><td>' + esc(e.payee) + '</td><td>' + esc(e.description) + '<div class="muted">' + esc(e.method_name) + '</div></td><td class="r">' + money(e.amount) + '</td><td>' + (e.status === 'void' ? '<span class="pill bad" title="' + esc(e.void_reason) + '">void</span>' : '<span class="pill ok">paid</span>') + '</td><td class="actions">' + (e.status === 'paid' && can('expenses.void') ? '<button class="sm danger" data-act="voidexp" data-id="' + e.id + '">Void</button>' : '') + '</td></tr>'; }), 'No expenses in this period.') + '</div>';
+          return '<tr><td>' + esc(e.expense_number) + '</td><td>' + esc(e.expense_date) + '</td><td>' + esc(e.category) + '</td><td>' + esc(e.payee) + '</td><td>' + esc(e.description) + '<div class="muted">' + esc(e.method_name) + '</div></td><td class="r">' + money(e.amount) + '</td><td>' + (e.status === 'void' || e.status === 'rejected' ? '<span class="pill bad" title="' + esc(e.void_reason) + '">' + e.status + '</span>' : e.status === 'paid' ? '<span class="pill ok">paid</span>' : '<span class="pill warn">' + e.status + '</span>') + '</td><td class="actions">' + (e.status === 'pending' && can('expenses.approve') ? '<button class="sm" data-act="expok" data-id="' + e.id + '">Approve</button> <button class="sm danger" data-act="expno" data-id="' + e.id + '">Reject</button>' : '') + (e.status === 'approved' && can('expenses.approve') ? '<button class="sm gold" data-act="exppay" data-id="' + e.id + '">Mark paid</button> ' : '') + ((e.status === 'paid' || e.status === 'approved') && can('expenses.void') ? '<button class="sm danger" data-act="voidexp" data-id="' + e.id + '">Void</button>' : '') + '</td></tr>'; }), 'No expenses in this period.') + '</div>';
+      S.expNeed = d.need_approval; var ep = v.querySelector('#exppol'); if (ep) ep.onchange = function () { API.call('expenses.setPolicy', { expenses_need_approval: ep.checked }).then(function () { toast(ep.checked ? 'Expenses now need approval.' : 'Expenses are recorded as paid again.'); refresh(); }).catch(function (e) { ep.checked = !ep.checked; fail(e); }); };
       v.querySelector('#ef').onsubmit = function (e) { e.preventDefault(); S.expFrom = e.target.from.value; S.expTo = e.target.to.value; refresh(); };
     });
   };
@@ -587,7 +600,7 @@
   // ----- receipts / invoice (print) -----
   function footerHtml(when, who) { return '<div class="docfoot">Generated by <b>SmartGuest</b> · ' + esc(when || new Date().toLocaleString()) + (who ? ' · ' + esc(who) : '') + '</div>'; }
   function showReceipt(d) {
-    var h = d.hotel || S.hotel || {}, head = '<div class="rc-head"><b>' + esc(h.name) + '</b><div class="muted">' + esc([h.address, h.phone].filter(Boolean).join(' · ')) + '</div></div>', sheets;
+    var h = d.hotel || S.hotel || {}, head = '<div class="rc-head">' + logoImg('rc-logo') + '<b>' + esc(h.name) + '</b><div class="muted">' + esc([h.address, h.phone].filter(Boolean).join(' · ')) + '</div></div>', sheets;
     if (d.kind === 'restaurant') {
       var o = d.order;
       sheets = d.copies.map(function (copy) {
@@ -655,8 +668,30 @@
     var h = S.hotel, edit = can('settings.manage');
     v.innerHTML = (edit ? '<div class="card"><h3>Hotel</h3><form id="hf"><div class="row"><div class="f"><label>Hotel name *</label><input name="name" required value="' + esc(h.name) + '"></div><div class="f"><label>Currency symbol</label><input name="currency_symbol" value="' + esc(h.currency_symbol) + '"></div></div><div class="row"><div class="f"><label>Phone</label><input name="phone" value="' + esc(h.phone) + '"></div><div class="f"><label>Email</label><input name="email" value="' + esc(h.email) + '"></div></div><div class="f"><label>Address</label><input name="address" value="' + esc(h.address) + '"></div>' +
       '<div class="row"><label class="chk f"><input type="checkbox" name="tax_enabled"' + (h.tax_enabled ? ' checked' : '') + '> Add tax to room charges</label><div class="f"><label>Tax name</label><input name="tax_name" value="' + esc(h.tax_name) + '"></div><div class="f"><label>Tax rate %</label><input name="tax_rate" type="number" step="0.01" min="0" max="100" value="' + esc(h.tax_rate) + '"></div></div><div class="actions"><button type="submit">Save hotel</button></div></form></div>' : '') +
+      (edit ? '<div class="card"><h3>Branding</h3><form id="bf"><div class="row"><div class="f"><label>Logo (PNG or JPEG, shown on sign-in, menu and receipts)</label><input type="file" id="blogo" accept="image/png,image/jpeg,image/webp"></div><div class="f" style="flex:0 0 140px"><div id="bprev" class="logo-prev">' + logoImg('rc-logo') + '</div></div></div><div class="row"><div class="f"><label>Main colour</label><input type="color" name="color" value="' + esc((S.brand && S.brand.color) || '#1d2740') + '"></div><div class="f"><label>Highlight colour</label><input type="color" name="accent" value="' + esc((S.brand && S.brand.accent) || '#b8913f') + '"></div><div class="f"><label>Tagline (sign-in page)</label><input name="tagline" maxlength="80" value="' + esc((S.brand && S.brand.tagline) || '') + '" placeholder="Hotel Management System"></div></div><div class="actions"><button type="submit">Save branding</button> <button type="button" class="sec" id="bclear">Remove logo and colours</button></div></form></div>' : '') +
       '<div class="card"><h3>Change my password</h3><form id="pw"><div class="row"><div class="f"><label>Current password</label><input type="password" name="current_password" required autocomplete="current-password"></div><div class="f"><label>New password</label><input type="password" name="new_password" required autocomplete="new-password"></div></div><div class="actions"><button type="submit">Change password</button></div></form></div>' +
       (API.inGas ? '' : '<div class="card"><h3>Server</h3><p class="muted" style="word-break:break-all">' + esc(API.getUrl()) + '</p><button class="sec sm" data-act="chgurl">Change server URL</button></div>');
+    var bf = v.querySelector('#bf'); if (bf) {
+      var newLogo;   // undefined = leave as is
+      function shrink(file) {
+        return new Promise(function (res, rej) {
+          var img = new Image(), url = URL.createObjectURL(file);
+          img.onload = function () {
+            var w = 240; while (w >= 60) {
+              var sc = Math.min(1, w / img.width), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * sc)); c.height = Math.max(1, Math.round(img.height * sc));
+              c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+              var out = c.toDataURL('image/png'); if (out.length > 40000) out = c.toDataURL('image/jpeg', 0.85);
+              if (out.length <= 40000) { URL.revokeObjectURL(url); return res(out); } w -= 40;
+            }
+            rej(new Error('That picture is too detailed to shrink. Try a simpler logo.'));
+          };
+          img.onerror = function () { rej(new Error('That file could not be read as a picture.')); }; img.src = url;
+        });
+      }
+      v.querySelector('#blogo').onchange = function (e) { if (!e.target.files[0]) return; shrink(e.target.files[0]).then(function (d) { newLogo = d; v.querySelector('#bprev').innerHTML = '<img class="rc-logo" src="' + d + '" alt="">'; }).catch(fail); };
+      bf.onsubmit = function (e) { e.preventDefault(); var f = e.target, d = { color: f.color.value, accent: f.accent.value, tagline: f.tagline.value }; if (newLogo !== undefined) d.logo = newLogo; busy(f.querySelector('button'), function () { return API.call('branding.save', d).then(function (b) { applyBrand(b); toast('Branding saved.'); render(); }); }); };
+      v.querySelector('#bclear').onclick = function () { if (confirm('Remove the logo and go back to the standard colours?')) API.call('branding.save', { logo: '', color: '', accent: '', tagline: '' }).then(function (b) { applyBrand(b); toast('Branding cleared.'); render(); }).catch(fail); };
+    }
     var hf = v.querySelector('#hf'); if (hf) hf.onsubmit = function (e) { e.preventDefault(); busy(e.target.querySelector('button'), function () { return API.call('hotel.save', formData(e.target)).then(function (r) { S.hotel = r; toast('Hotel saved.'); refresh(); }); }); };
     v.querySelector('#pw').onsubmit = function (e) { e.preventDefault(); var f = e.target; busy(f.querySelector('button'), function () { return API.call('auth.changePassword', formData(f)).then(function () { f.reset(); toast('Password changed. Other devices were signed out.'); }); }); };
     return Promise.resolve();
@@ -892,6 +927,41 @@
   }
   Object.assign(MORE, { rpnew: function () { rpModal(); }, rpedit: function (b) { rpModal(S.rpPlans.filter(function (x) { return String(x.id) === b.getAttribute('data-id'); })[0]); } });
 
+
+  // ----- expense actions, stock links, open orders -----
+  Object.assign(MORE, {
+    expok: function (b) { busy(b, function () { return API.call('expenses.approve', { id: Number(b.getAttribute('data-id')) }).then(function () { toast('Approved.'); refresh(); }); }); },
+    expno: function (b) { var r = prompt('Reason for rejecting:'); if (r) busy(b, function () { return API.call('expenses.reject', { id: Number(b.getAttribute('data-id')), reason: r }).then(function () { toast('Rejected.'); refresh(); }); }); },
+    exppay: function (b) {
+      var id = Number(b.getAttribute('data-id'));
+      simpleModal('Mark as paid', '<div class="f"><label>Paid by *</label><select name="payment_method_id">' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select></div>', 'expenses.pay', { id: id });
+    },
+    stklinks: function () {
+      API.call('stockLinks.list').then(function (d) {
+        modal('Menu items and stock', '<p class="muted">Pick the stock item a menu item uses and how much one serving takes. Leave the item blank for no link.</p>' + table(['Menu', 'Item', 'Per serving', ''], d.menus.map(function (m, i) {
+          return '<tr><td>' + esc(m.name) + '<div class="muted">' + (m.module === 'restaurant' ? 'Restaurant' : 'Room service') + '</div></td><td><select data-i="' + i + '" data-f="inv"><option value="">— none —</option>' + d.items.map(function (x) { return '<option value="' + x.id + '"' + (x.id === m.inventory_item_id ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select></td><td><input type="number" step="0.001" min="0" style="width:90px" data-i="' + i + '" data-f="qty" value="' + (m.quantity_per_serving || '') + '"></td><td><button class="sm" data-act="stksave" data-i="' + i + '">Save</button></td></tr>'; }), 'No menu items yet.'),
+          function (m) { S.stkData = d; S.stkModal = m; });
+      }).catch(fail);
+    },
+    stksave: function (b) {
+      var i = b.getAttribute('data-i'), m = S.stkData.menus[Number(i)], root = S.stkModal.el;
+      busy(b, function () { return API.call('stockLinks.save', { module: m.module, menu_item_id: m.menu_item_id, inventory_item_id: root.querySelector('select[data-i="' + i + '"]').value || '', quantity_per_serving: root.querySelector('input[data-i="' + i + '"]').value }).then(function () { toast('Saved.'); }); });
+    },
+    fuok: function (b) { fuModal(b, 'collected_outside'); },
+    funo: function (b) { fuModal(b, 'written_off'); }
+  });
+  function fuModal(b, res) {
+    var o = S.fuList[Number(b.getAttribute('data-i'))];
+    simpleModal(res === 'written_off' ? 'Write off ' + o.order_number : 'Record ' + o.order_number + ' as collected', (res === 'collected_outside' ? '<div class="f"><label>Money received by *</label><select name="payment_method_id">' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select></div>' : '') + '<div class="f"><label>Reason *</label><input name="reason" required placeholder="What happened?"></div>', 'followups.resolve', { outlet: o.outlet, order_id: o.order_id, resolution: res });
+  }
+  VIEWS.followups = function (v) {
+    return API.call('followups.list').then(function (l) {
+      S.fuList = l;
+      v.innerHTML = '<div class="card"><h3>Orders left open</h3><p class="muted">Restaurant and room-service orders that were never settled: the guest has checked out, or the order is over a day old. Record the money if it was collected, or write the order off with a reason.</p>' +
+        table(['Order', 'Outlet', 'Guest', '>Total', 'Status', 'Since', ''], l.map(function (o, i) { return '<tr><td>' + esc(o.order_number) + '</td><td>' + esc(o.outlet_label) + '</td><td>' + esc(o.guest_name) + (o.room_number ? '<div class="muted">Room ' + esc(o.room_number) + '</div>' : '') + '</td><td class="r">' + money(o.total) + '</td><td>' + pill(o.status) + '</td><td class="muted">' + esc(o.created_at) + '</td><td class="actions"><button class="sm" data-act="fuok" data-i="' + i + '">Collected</button> <button class="sm danger" data-act="funo" data-i="' + i + '">Write off</button></td></tr>'; }), 'Nothing is waiting. All orders are settled.') + '</div>';
+    });
+  };
+
   // ----- events -----
   VIEWS.events = function (v) {
     var tab = S.evTab || 'bookings', tabs = [['bookings', 'Bookings'], ['spaces', 'Spaces']];
@@ -946,7 +1016,7 @@
         '<div class="grid g4"><div class="stat"><span>Income</span><b>' + money(a.total_income) + '</b></div><div class="stat"><span>Expenses</span><b>' + money(a.total_expenses) + '</b></div><div class="stat"><span>Net profit</span><b class="' + (a.net < 0 ? 'neg' : '') + '">' + money(a.net) + '</b></div><div class="stat"><span>Owed to the hotel</span><b>' + money(a.total_receivable) + '</b></div></div>' +
         '<div class="grid g2" style="margin-top:16px"><div class="card"><h3>Income</h3>' + table(['Source', '>Amount'], kv(a.income), 'No income in this period.') + '</div><div class="card"><h3>Expenses</h3>' + table(['Category', '>Amount'], kv(a.expenses), 'No expenses in this period.') + '</div></div>' +
         '<div class="card"><h3>Accounts receivable <span class="muted" style="font-weight:400">— guest folios and event-client balances still owed (today)</span></h3>' + table(['Who', 'Reference', 'Detail', '>Balance'], a.receivables.map(function (r) { return '<tr><td>' + esc(r.who) + '</td><td>' + esc(r.ref) + '</td><td>' + esc(r.detail) + '</td><td class="r">' + money(r.balance) + '</td></tr>'; }), 'Nobody owes the hotel anything.') + '</div>' +
-        '<p class="muted">Income counts charges posted to room bills (excluding tax), walk-in sales, walk-in car rentals and completed directly-billed events. Expenses are recorded as paid, so there is no payables list.</p>' + footerHtml();
+        (a.payables && a.payables.length ? '<div class="card"><h3>We owe (approved or waiting for approval) — ' + money(a.total_payable) + '</h3>' + table(['Ref', 'Payee', 'Detail', 'Status', '>Amount'], a.payables.map(function (r) { return '<tr><td>' + esc(r.ref) + '</td><td>' + esc(r.payee) + '</td><td>' + esc(r.detail) + '</td><td>' + esc(r.status) + '</td><td class="r">' + money(r.amount) + '</td></tr>'; })) + '</div>' : '') + '<p class="muted">Income counts charges posted to room bills (excluding tax), walk-in sales, walk-in car rentals and completed directly-billed events. Expenses count once they are paid.</p>' + footerHtml();
       v.querySelector('#af').onsubmit = function (e) { e.preventDefault(); S.acFrom = e.target.from.value; S.acTo = e.target.to.value; refresh(); };
     });
   };
@@ -993,7 +1063,7 @@
     editoitem: function (b) { outletItemModal(S.outletItems.filter(function (i) { return String(i.id) === b.getAttribute('data-id'); })[0]); },
     newexpcat: function () { simpleModal('Add expense category', '<div class="f"><label>Name *</label><input name="name" required></div>', 'expenses.categorySave'); },
     newexp: function () {
-      simpleModal('Record expense', '<div class="row"><div class="f"><label>Date</label><input type="date" name="expense_date" value="' + today() + '" required></div><div class="f"><label>Category *</label><select name="category_id">' + opts(S.expCats, 'id', function (c) { return c.name; }) + '</select></div></div><div class="row"><div class="f"><label>Payee *</label><input name="payee" required></div><div class="f"><label>Amount *</label><input name="amount" type="number" step="0.01" min="0.01" required></div></div><div class="f"><label>Description *</label><input name="description" required></div><div class="f"><label>Paid by</label><select name="payment_method_id">' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select></div>', 'expenses.create');
+      simpleModal('Record expense', '<div class="row"><div class="f"><label>Date</label><input type="date" name="expense_date" value="' + today() + '" required></div><div class="f"><label>Category *</label><select name="category_id">' + opts(S.expCats, 'id', function (c) { return c.name; }) + '</select></div></div><div class="row"><div class="f"><label>Payee *</label><input name="payee" required></div><div class="f"><label>Amount *</label><input name="amount" type="number" step="0.01" min="0.01" required></div></div><div class="f"><label>Description *</label><input name="description" required></div>' + (S.expNeed ? '<p class="muted">This will wait for approval before it counts as an expense.</p>' : '<div class="f"><label>Paid by</label><select name="payment_method_id">' + opts(S.methods, 'id', function (m) { return m.name; }) + '</select></div>'), 'expenses.create');
     },
     voidexp: function (b) { var r = prompt('Reason for voiding this expense:'); if (r) busy(b, function () { return API.call('expenses.void', { id: Number(b.getAttribute('data-id')), reason: r }).then(function () { toast('Expense voided.'); refresh(); }); }); },
     invtab: function (b) { S.invTab = b.getAttribute('data-t'); refresh(); },
