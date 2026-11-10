@@ -1,7 +1,7 @@
 /* SmartGuest front end - plain JavaScript, no build step. Works inside Apps Script and on GitHub Pages. */
 (function () {
   'use strict';
-  var APP_VERSION = '2026.11.09-f';
+  var APP_VERSION = '2026.11.10-a';
   var S = { user: null, hotel: null, methods: [], route: 'dashboard' };
   var $app = document.getElementById('app');
 
@@ -669,6 +669,7 @@
     v.innerHTML = (edit ? '<div class="card"><h3>Hotel</h3><form id="hf"><div class="row"><div class="f"><label>Hotel name *</label><input name="name" required value="' + esc(h.name) + '"></div><div class="f"><label>Currency symbol</label><input name="currency_symbol" value="' + esc(h.currency_symbol) + '"></div></div><div class="row"><div class="f"><label>Phone</label><input name="phone" value="' + esc(h.phone) + '"></div><div class="f"><label>Email</label><input name="email" value="' + esc(h.email) + '"></div></div><div class="f"><label>Address</label><input name="address" value="' + esc(h.address) + '"></div>' +
       '<div class="row"><label class="chk f"><input type="checkbox" name="tax_enabled"' + (h.tax_enabled ? ' checked' : '') + '> Add tax to room charges</label><div class="f"><label>Tax name</label><input name="tax_name" value="' + esc(h.tax_name) + '"></div><div class="f"><label>Tax rate %</label><input name="tax_rate" type="number" step="0.01" min="0" max="100" value="' + esc(h.tax_rate) + '"></div></div><div class="actions"><button type="submit">Save hotel</button></div></form></div>' : '') +
       (edit ? '<div class="card"><h3>Branding</h3><form id="bf"><div class="row"><div class="f"><label>Logo (PNG or JPEG, shown on sign-in, menu and receipts)</label><input type="file" id="blogo" accept="image/png,image/jpeg,image/webp"></div><div class="f" style="flex:0 0 140px"><div id="bprev" class="logo-prev">' + logoImg('rc-logo') + '</div></div></div><div class="row"><div class="f"><label>Main colour</label><input type="color" name="color" value="' + esc((S.brand && S.brand.color) || '#1d2740') + '"></div><div class="f"><label>Highlight colour</label><input type="color" name="accent" value="' + esc((S.brand && S.brand.accent) || '#b8913f') + '"></div><div class="f"><label>Tagline (sign-in page)</label><input name="tagline" maxlength="80" value="' + esc((S.brand && S.brand.tagline) || '') + '" placeholder="Hotel Management System"></div></div><div class="actions"><button type="submit">Save branding</button> <button type="button" class="sec" id="bclear">Remove logo and colours</button></div></form></div>' : '') +
+      (edit ? '<div class="card"><h3>Database health</h3><p class="muted">Your data lives in the Google Sheet. Check it is tidy, release unused space, and make sure the nightly backup and clean-up are scheduled.</p><div class="actions"><button class="sm" data-act="shcheck">Check now</button> <button class="sm sec" data-act="shrepair">Repair sheets</button> <button class="sm sec" data-act="shclean">Run clean-up now</button> <button class="sm sec" data-act="shsched">Schedule nightly jobs</button></div><div id="shout" style="margin-top:10px"></div></div>' : '') +
       '<div class="card"><h3>Change my password</h3><form id="pw"><div class="row"><div class="f"><label>Current password</label><input type="password" name="current_password" required autocomplete="current-password"></div><div class="f"><label>New password</label><input type="password" name="new_password" required autocomplete="new-password"></div></div><div class="actions"><button type="submit">Change password</button></div></form></div>' +
       (API.inGas ? '' : '<div class="card"><h3>Server</h3><p class="muted" style="word-break:break-all">' + esc(API.getUrl()) + '</p><button class="sec sm" data-act="chgurl">Change server URL</button></div>');
     var bf = v.querySelector('#bf'); if (bf) {
@@ -961,6 +962,25 @@
         table(['Order', 'Outlet', 'Guest', '>Total', 'Status', 'Since', ''], l.map(function (o, i) { return '<tr><td>' + esc(o.order_number) + '</td><td>' + esc(o.outlet_label) + '</td><td>' + esc(o.guest_name) + (o.room_number ? '<div class="muted">Room ' + esc(o.room_number) + '</div>' : '') + '</td><td class="r">' + money(o.total) + '</td><td>' + pill(o.status) + '</td><td class="muted">' + esc(o.created_at) + '</td><td class="actions"><button class="sm" data-act="fuok" data-i="' + i + '">Collected</button> <button class="sm danger" data-act="funo" data-i="' + i + '">Write off</button></td></tr>'; }), 'Nothing is waiting. All orders are settled.') + '</div>';
     });
   };
+
+
+  // ----- database health -----
+  function shShow(h) {
+    var pct = h.used_pct, col = pct >= 90 ? 'var(--danger)' : pct >= 70 ? 'var(--warn)' : 'var(--ok)';
+    document.getElementById('shout').innerHTML = '<div class="kv"><b>Space used</b><span>' + pct + '% of ' + (h.cell_limit / 1e6) + ' million cells</span></div><div style="height:8px;background:var(--muted-bg);border-radius:4px;margin:4px 0 10px"><div style="height:8px;width:' + Math.min(100, pct) + '%;background:' + col + ';border-radius:4px"></div></div>' +
+      '<div class="kv"><b>Nightly backup</b><span>' + (h.triggers ? (h.triggers.backup ? 'scheduled' : '<b style="color:var(--danger)">not scheduled</b>') : 'unknown') + '</span><b>Nightly clean-up</b><span>' + (h.triggers ? (h.triggers.cleanup ? 'scheduled' : '<b style="color:var(--danger)">not scheduled</b>') : 'unknown') + '</span><b>Archived audit entries</b><span>' + h.audit_archive_rows + '</span></div>' +
+      (h.problems.length ? '<h4 style="margin-top:10px">Needs attention</h4><ul>' + h.problems.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '<p class="pill ok" style="display:inline-block;margin-top:8px">Everything looks healthy</p>') +
+      '<details style="margin-top:8px"><summary>Per-sheet details</summary>' + table(['Sheet', '>Rows', 'Header', '>Blank rows', '>Cells reserved'], h.tables.map(function (t) { return '<tr><td>' + esc(t.name) + '</td><td class="r">' + t.rows + '</td><td>' + esc(t.header) + '</td><td class="r">' + t.blank_rows + '</td><td class="r">' + t.allocated.toLocaleString() + '</td></tr>'; })) + '</details><p class="muted">Checked ' + esc(h.checked_at) + '</p>';
+  }
+  function shRun(b, action, msg) {
+    busy(b, function () { return API.call(action, {}).then(function (r) { toast(msg(r)); return API.call('sheets.health'); }).then(shShow); });
+  }
+  Object.assign(MORE, {
+    shcheck: function (b) { busy(b, function () { return API.call('sheets.health').then(shShow); }); },
+    shrepair: function (b) { shRun(b, 'sheets.repair', function (r) { return 'Repaired: ' + r.headers_fixed + ' header(s), ' + r.blank_rows_removed + ' blank row(s), ' + r.cells_released.toLocaleString() + ' cells released.'; }); },
+    shclean: function (b) { shRun(b, 'sheets.maintain', function (r) { return 'Clean-up done: ' + r.sessions + ' old sign-ins, ' + r.retry_log + ' retry records, ' + r.audit_archived + ' audit entries archived.'; }); },
+    shsched: function (b) { shRun(b, 'sheets.schedule', function (r) { return r.message; }); }
+  });
 
   // ----- events -----
   VIEWS.events = function (v) {
