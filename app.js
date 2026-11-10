@@ -1,7 +1,7 @@
 /* SmartGuest front end - plain JavaScript, no build step. Works inside Apps Script and on GitHub Pages. */
 (function () {
   'use strict';
-  var APP_VERSION = '2026.11.10-a';
+  var APP_VERSION = '2026.11.10-b';
   var S = { user: null, hotel: null, methods: [], route: 'dashboard' };
   var $app = document.getElementById('app');
 
@@ -96,7 +96,10 @@
     ['guests', 'Guests', 'guests.view'], ['rooms', 'Rooms', 'rooms.view'], ['housekeeping', 'Housekeeping', 'housekeeping.view'], ['restaurant', 'Restaurant', 'restaurant.view'], ['outlets', 'Services & Shops', ['bar.view', 'gift_shop.view', 'business_centre.view', 'salon.view', 'spa.view', 'laundry.view', 'gym.view', 'pool.view', 'parking.view', 'transport.view']], ['inventory', 'Inventory', 'inventory.view'], ['expenses', 'Expenses', 'expenses.view'], ['roomservice', 'Room Service', 'room_service.view'], ['carrental', 'Car Rental', 'car_rental.view'], ['events', 'Events', 'events.view'], ['payroll', 'Payroll', 'payroll.view'], ['accounting', 'Accounting', 'accounting.view'], ['refunds', 'Refunds', 'payments.reverse'], ['maintenance', 'Maintenance', 'maintenance.view'], ['followups', 'Open Orders', 'followups.manage'], ['rateplans', 'Rate Plans', 'rooms.view'],
     ['reports', 'Reports', 'reports.view'], ['users', 'Users & Roles', 'users.manage'], ['settings', 'Settings', null], ['audit', 'Audit Log', 'audit.view']
   ];
-  function allowedPages() { return PAGES.filter(function (p) { return !p[2] || (Array.isArray(p[2]) ? p[2].some(can) : can(p[2])); }); }
+  var PAGE_MODULE = { restaurant: 'restaurant', roomservice: 'roomservice', inventory: 'inventory', carrental: 'carrental', events: 'events', payroll: 'payroll', accounting: 'accounting', maintenance: 'maintenance', rateplans: 'rateplans', followups: 'followups' };
+  function modOff(id) { return (S.off || []).indexOf(id) !== -1; }
+  function pageOn(id) { if (id === 'outlets') return Object.keys(OUTLET_LABELS).some(function (k) { return !modOff('outlet:' + k); }); return !PAGE_MODULE[id] || !modOff(PAGE_MODULE[id]); }
+  function allowedPages() { return PAGES.filter(function (p) { return pageOn(p[0]) && (!p[2] || (Array.isArray(p[2]) ? p[2].some(can) : can(p[2]))); }); }
 
   function render() {
     var pages = allowedPages();
@@ -156,7 +159,7 @@
 
   function boot() {
     return API.call('app.boot').then(function (r) {
-      S.user = r.user; S.hotel = r.hotel; if (r.brand) applyBrand(r.brand); S.methods = r.methods; API.setUser(r.user.username); API.setWrites(r.writes);
+      S.user = r.user; S.hotel = r.hotel; if (r.brand) applyBrand(r.brand); S.off = r.modules_off || []; S.methods = r.methods; API.setUser(r.user.username); API.setWrites(r.writes);
       S.route = location.hash.slice(1) || 'dashboard'; render(); warmCache();
     });
   }
@@ -461,7 +464,7 @@
   var OUTLET_LABELS = { bar: 'Bar', gift_shop: 'Gift Shop', business_centre: 'Business Centre', salon: 'Salon', spa: 'Spa', laundry: 'Laundry', gym: 'Gym', pool: 'Pool', parking: 'Parking', transport: 'Transport' };
   S.cart = {};
   VIEWS.outlets = function (v) {
-    var keys = Object.keys(OUTLET_LABELS).filter(function (k) { return can(k + '.view'); });
+    var keys = Object.keys(OUTLET_LABELS).filter(function (k) { return can(k + '.view') && !modOff('outlet:' + k); });
     var cur = keys.indexOf(S.outlet) !== -1 ? S.outlet : keys[0], tx = can(cur + '.transact'), mg = can(cur + '.manage');
     var cart = S.cart[cur] = S.cart[cur] || [];
     return Promise.all([API.call('outlet.list', { outlet: cur }), tx ? API.call('frontdesk.inHouse').catch(function () { return []; }) : Promise.resolve([])]).then(function (r) {
@@ -669,9 +672,15 @@
     v.innerHTML = (edit ? '<div class="card"><h3>Hotel</h3><form id="hf"><div class="row"><div class="f"><label>Hotel name *</label><input name="name" required value="' + esc(h.name) + '"></div><div class="f"><label>Currency symbol</label><input name="currency_symbol" value="' + esc(h.currency_symbol) + '"></div></div><div class="row"><div class="f"><label>Phone</label><input name="phone" value="' + esc(h.phone) + '"></div><div class="f"><label>Email</label><input name="email" value="' + esc(h.email) + '"></div></div><div class="f"><label>Address</label><input name="address" value="' + esc(h.address) + '"></div>' +
       '<div class="row"><label class="chk f"><input type="checkbox" name="tax_enabled"' + (h.tax_enabled ? ' checked' : '') + '> Add tax to room charges</label><div class="f"><label>Tax name</label><input name="tax_name" value="' + esc(h.tax_name) + '"></div><div class="f"><label>Tax rate %</label><input name="tax_rate" type="number" step="0.01" min="0" max="100" value="' + esc(h.tax_rate) + '"></div></div><div class="actions"><button type="submit">Save hotel</button></div></form></div>' : '') +
       (edit ? '<div class="card"><h3>Branding</h3><form id="bf"><div class="row"><div class="f"><label>Logo (PNG or JPEG, shown on sign-in, menu and receipts)</label><input type="file" id="blogo" accept="image/png,image/jpeg,image/webp"></div><div class="f" style="flex:0 0 140px"><div id="bprev" class="logo-prev">' + logoImg('rc-logo') + '</div></div></div><div class="row"><div class="f"><label>Main colour</label><input type="color" name="color" value="' + esc((S.brand && S.brand.color) || '#1d2740') + '"></div><div class="f"><label>Highlight colour</label><input type="color" name="accent" value="' + esc((S.brand && S.brand.accent) || '#b8913f') + '"></div><div class="f"><label>Tagline (sign-in page)</label><input name="tagline" maxlength="80" value="' + esc((S.brand && S.brand.tagline) || '') + '" placeholder="Hotel Management System"></div></div><div class="actions"><button type="submit">Save branding</button> <button type="button" class="sec" id="bclear">Remove logo and colours</button></div></form></div>' : '') +
+      (edit ? '<div class="card"><h3>Modules</h3><p class="muted">Switch off what this hotel does not use. It disappears from the menu and cannot be used by anyone; nothing is deleted, and you can switch it back on at any time.</p><div id="modbox" class="muted">Loading...</div></div>' : '') +
       (edit ? '<div class="card"><h3>Database health</h3><p class="muted">Your data lives in the Google Sheet. Check it is tidy, release unused space, and make sure the nightly backup and clean-up are scheduled.</p><div class="actions"><button class="sm" data-act="shcheck">Check now</button> <button class="sm sec" data-act="shrepair">Repair sheets</button> <button class="sm sec" data-act="shclean">Run clean-up now</button> <button class="sm sec" data-act="shsched">Schedule nightly jobs</button></div><div id="shout" style="margin-top:10px"></div></div>' : '') +
       '<div class="card"><h3>Change my password</h3><form id="pw"><div class="row"><div class="f"><label>Current password</label><input type="password" name="current_password" required autocomplete="current-password"></div><div class="f"><label>New password</label><input type="password" name="new_password" required autocomplete="new-password"></div></div><div class="actions"><button type="submit">Change password</button></div></form></div>' +
       (API.inGas ? '' : '<div class="card"><h3>Server</h3><p class="muted" style="word-break:break-all">' + esc(API.getUrl()) + '</p><button class="sec sm" data-act="chgurl">Change server URL</button></div>');
+    var mb = v.querySelector('#modbox'); if (mb) API.call('modules.list').then(function (list) {
+      function row(m) { return '<label class="chk" style="display:block;margin:4px 0"><input type="checkbox" data-mod="' + esc(m.id) + '"' + (m.enabled ? ' checked' : '') + '> ' + esc(m.name) + '</label>'; }
+      mb.className = ''; mb.innerHTML = list.filter(function (m) { return !m.group; }).map(row).join('') + '<h4 style="margin:10px 0 2px">Services &amp; Shops</h4>' + list.filter(function (m) { return m.group; }).map(row).join('');
+      mb.onchange = function (e) { var cb = e.target; if (!cb.getAttribute('data-mod')) return; API.call('modules.set', { id: cb.getAttribute('data-mod'), enabled: cb.checked }).then(function (r) { S.off = r.off; toast(cb.checked ? 'Switched on.' : 'Switched off.'); var keep = document.querySelector('.main').scrollTop; render(); }).catch(function (er) { cb.checked = !cb.checked; fail(er); }); };
+    }).catch(function () { mb.textContent = 'Could not load.'; });
     var bf = v.querySelector('#bf'); if (bf) {
       var newLogo;   // undefined = leave as is
       function shrink(file) {
